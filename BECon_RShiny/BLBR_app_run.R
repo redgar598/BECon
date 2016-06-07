@@ -1,6 +1,6 @@
 library(shiny)
 library(reshape)
-setwd("~/Documents/Blood_Brain")
+setwd("~/BLBR")
 
-runApp("BLBR_app")
+runApp("BLBR_app_beta")
 

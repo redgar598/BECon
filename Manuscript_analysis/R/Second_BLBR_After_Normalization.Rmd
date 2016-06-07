@@ -1,0 +1,261 @@
+Things to run after normalization
+========================================================
+  
+## Libraries
+```{r}
+setwd("~/Documents/Blood_Brain/")
+library(reshape)
+library(ggplot2)
+library(RColorBrewer)
+library(mclust)
+library(IlluminaHumanMethylation450k.db)
+```
+
+########################################################  CELL ADJUSTED
+## Load combatted data with no replicates
+```{r}
+load("Second_cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates.RData") #441198     66
+## need cell comp adjusted data and need to remove replicates
+```
+
+#### Any meta data
+```{r}
+meta<-read.csv("~/Documents/Blood_Brain/SampleInfo.csv")
+fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
+meta$X<-fix_names
+meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+```
+
+## Missing PBMC
+```{r}
+PBMC_indx<-which(meta$TissueType=="PBMC") #16
+BRAIN7_indx<-which(meta$TissueType=="BRAIN7") #17
+BRAIN10_indx<-which(meta$TissueType=="BRAIN10") #17
+BRAIN20_indx<-which(meta$TissueType=="BRAIN20") #16
+
+    #which PBMC is missing [individual 173]
+    meta[BRAIN7_indx,][which(!(meta[BRAIN7_indx,]$SubjectNumC%in%meta[PBMC_indx,]$SubjectNumC)),]
+    meta[BRAIN10_indx,][which(!(meta[BRAIN10_indx,]$SubjectNumC%in%meta[PBMC_indx,]$SubjectNumC)),]
+    #which BRAIN20 is missing [individual 221]
+    meta[BRAIN7_indx,][which(!(meta[BRAIN7_indx,]$SubjectNumC%in%meta[BRAIN20_indx,]$SubjectNumC)),]
+    meta[BRAIN10_indx,][which(!(meta[BRAIN10_indx,]$SubjectNumC%in%meta[BRAIN20_indx,]$SubjectNumC)),]
+
+## can work without on brain 20 but sample without PBMC is not useable
+combat_BLBR_Beta<-combat_BLBR_Beta[,which(!(colnames(combat_BLBR_Beta)%in%c("BA20173","BA10173","BA7173")))] #441198     65
+meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+
+
+## Need to add 221 BRAIN20 for cor (just as NA though)
+combat_BLBR_Beta_correlation<-as.data.frame(combat_BLBR_Beta)
+combat_BLBR_Beta_correlation$BA20221<-"NA"
+BA20221<-data.frame(X="BA20221", SampleID="BA20221", SubjectNumC=221, Barcode="NA", Section="NA", Well="NA", TissueType="BRAIN20", Replicate="NA", Gender="NA", Age="NA",  PH="NA", RefrigerationDelayHrs="NA", Row="NA")
+meta_correlation<-rbind(meta,BA20221)
+meta_correlation<-meta_correlation[which(meta_correlation$X%in%colnames(combat_BLBR_Beta_correlation)),]
+meta_correlation<-meta_correlation[match(colnames(combat_BLBR_Beta_correlation), meta_correlation$X),]
+
+combat_BLBR_Beta<-combat_BLBR_Beta_correlation# 441198     64
+save(combat_BLBR_Beta, file="cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates_16_All.RData")
+```
+
+
+## Correlate CpGs Between Blood and each brain Region
+```{r}
+PBMC_indx<-which(meta_correlation$TissueType=="PBMC") #16
+BRAIN7_indx<-which(meta_correlation$TissueType=="BRAIN7") #16
+BRAIN10_indx<-which(meta_correlation$TissueType=="BRAIN10") #16
+BRAIN20_indx<-which(meta_correlation$TissueType=="BRAIN20") #16
+
+PBMC_BLBR<-combat_BLBR_Beta_correlation[,PBMC_indx]
+BRAIN7_BLBR<-combat_BLBR_Beta_correlation[,BRAIN7_indx]
+BRAIN10_BLBR<-combat_BLBR_Beta_correlation[,BRAIN10_indx]
+BRAIN20_BLBR<-combat_BLBR_Beta_correlation[,BRAIN20_indx]
+
+# put in PBMC sample order
+BRAIN7_BLBR<-BRAIN7_BLBR[,c(2,3,1,5,4,6,9,7,8,10,11,12,13,14,15,16)]
+BRAIN10_BLBR<-BRAIN10_BLBR[,c(1,3,2,6,4,5,7,9,8,11,10,12,14,13,16,15)]
+BRAIN20_BLBR<-BRAIN20_BLBR[,c(2,1,3,4,5,6,9,7,8,10,16,11,12,13,15,14)]
+
+# for python
+write.csv(meta, file="Python/Second_Meta_BLBR_jan22.csv")
+write.csv(PBMC_BLBR, file="Python/Second_PBMC_BLBR_jan22.csv")
+write.csv(BRAIN7_BLBR, file="Python/Second_BRAIN7_BLBR_jan22.csv")
+write.csv(BRAIN10_BLBR, file="Python/Second_BRAIN10_BLBR_jan22.csv")
+write.csv(BRAIN20_BLBR, file="Python/Second_BRAIN20_BLBR_jan22.csv")
+````
+
+## ran on Kandy under Second_Sept2015 python Second_BLBR_Correlation_Permutation_jan22.py 
+
+
+
+                
+                ########################################################  CELL UNADJUSTED
+                ## Load combatted data with no replicates
+                ```{r}
+                load("cell_unadjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates.RData") #441198     66
+                ## need cell comp adjusted data and need to remove replicates
+                ```
+                
+                #### Any meta data
+                ```{r}
+                meta<-read.csv("~/Documents/Blood_Brain/SampleInfo.csv")
+                fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
+                meta$X<-fix_names
+                meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+                meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+                ```
+                
+                ## Missing PBMC
+                ```{r}
+                PBMC_indx<-which(meta$TissueType=="PBMC") #16
+                BRAIN7_indx<-which(meta$TissueType=="BRAIN7") #17
+                BRAIN10_indx<-which(meta$TissueType=="BRAIN10") #17
+                BRAIN20_indx<-which(meta$TissueType=="BRAIN20") #16
+                
+                    #which PBMC is missing [individual 173]
+                    meta[BRAIN7_indx,][which(!(meta[BRAIN7_indx,]$SubjectNumC%in%meta[PBMC_indx,]$SubjectNumC)),]
+                    meta[BRAIN10_indx,][which(!(meta[BRAIN10_indx,]$SubjectNumC%in%meta[PBMC_indx,]$SubjectNumC)),]
+                    #which BRAIN20 is missing [individual 221]
+                    meta[BRAIN7_indx,][which(!(meta[BRAIN7_indx,]$SubjectNumC%in%meta[BRAIN20_indx,]$SubjectNumC)),]
+                    meta[BRAIN10_indx,][which(!(meta[BRAIN10_indx,]$SubjectNumC%in%meta[BRAIN20_indx,]$SubjectNumC)),]
+                
+                ## can work without on brain 20 but sample without PBMC is not useable
+                combat_BLBR_Beta<-combat_BLBR_Beta[,which(!(colnames(combat_BLBR_Beta)%in%c("BA20173","BA10173","BA7173")))] #460199     65
+                meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+                meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+                
+                
+                ## Need to add 221 BRAIN20 for cor (just as NA though)
+                combat_BLBR_Beta_correlation<-as.data.frame(combat_BLBR_Beta)
+                combat_BLBR_Beta_correlation$BA20221<-"NA"
+                BA20221<-data.frame(X="BA20221", SampleID="BA20221", SubjectNumC=221, 
+                Barcode="NA", Section="NA", Well="NA", TissueType="BRAIN20", Replicate="NA", 
+                Gender="NA", Age="NA",  PH="NA", RefrigerationDelayHrs="NA", Row="NA")
+                meta_correlation<-rbind(meta,BA20221)
+                meta_correlation<-meta_correlation[which(meta_correlation$X%in%colnames(combat_BLBR_Beta_correlation)),]
+                meta_correlation<-meta_correlation[match(colnames(combat_BLBR_Beta_correlation), meta_correlation$X),]
+                ```
+                ## Correlate CpGs Between Blood and each brain Region
+                ```{r}
+                PBMC_indx<-which(meta_correlation$TissueType=="PBMC") #16
+                BRAIN7_indx<-which(meta_correlation$TissueType=="BRAIN7") #16
+                BRAIN10_indx<-which(meta_correlation$TissueType=="BRAIN10") #16
+                BRAIN20_indx<-which(meta_correlation$TissueType=="BRAIN20") #16
+                
+                PBMC_BLBR<-combat_BLBR_Beta_correlation[,PBMC_indx]
+                BRAIN7_BLBR<-combat_BLBR_Beta_correlation[,BRAIN7_indx]
+                BRAIN10_BLBR<-combat_BLBR_Beta_correlation[,BRAIN10_indx]
+                BRAIN20_BLBR<-combat_BLBR_Beta_correlation[,BRAIN20_indx]
+                
+                # put in PBMC sample order
+                BRAIN7_BLBR<-BRAIN7_BLBR[,c(2,3,1,5,4,6,9,7,8,10,11,12,13,14,15,16)]
+                BRAIN10_BLBR<-BRAIN10_BLBR[,c(1,3,2,6,4,5,7,9,8,11,10,12,14,13,16,15)]
+                BRAIN20_BLBR<-BRAIN20_BLBR[,c(2,1,3,4,5,6,9,7,8,10,16,11,12,13,15,14)]
+                
+                # for python
+                write.csv(meta, file="Python/Meta_BLBR_unadjustjan22.csv")
+                write.csv(PBMC_BLBR, file="Python/PBMC_BLBR_unadjustjan22.csv")
+                write.csv(BRAIN7_BLBR, file="Python/BRAIN7_BLBR_unadjustjan22.csv")
+                write.csv(BRAIN10_BLBR, file="Python/BRAIN10_BLBR_unadjustjan22.csv")
+                write.csv(BRAIN20_BLBR, file="Python/BRAIN20_BLBR_unadjustjan22.csv")
+                ````
+
+              
+                        
+                        
+## PYTHON CORRELATION
+                        
+# Python correlations from python BLBR_Correlation_Permutation.py 
+```{r}
+load("Second_cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates.RData") #441198     66
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta
+load("cell_unadjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates.RData") #441198     66
+combat_BLBR_Beta_unadjusted<-combat_BLBR_Beta
+
+correlations_BLBR<-read.csv("~/Documents/Blood_Brain/Python/Second_correlation_sept2015.csv", sep="\t")
+correlations_BLBR_unctype_adjusted<-read.csv("~/Documents/Blood_Brain/Python/correlation_unadjustjan22.csv", sep="\t")
+correlations_BLBR_original<-read.csv("~/Documents/Blood_Brain/Python/correlation_jan22.csv", sep="\t")
+                       
+
+colnames(correlations_BLBR)<-c("CpG","BRAIN7","BRAIN10","BRAIN20")
+correlations_BLBR$CpG<-rownames(combat_BLBR_Beta)
+
+colnames(correlations_BLBR_unctype_adjusted)<-c("CpG","BRAIN7","BRAIN10","BRAIN20")
+correlations_BLBR_unctype_adjusted$CpG<-rownames(combat_BLBR_Beta)
+                        
+                        
+            #Unitl redo correlations with new probe number
+            correlations_BLBR_old<-read.csv("~/Documents/Blood_Brain/Python/correlation.csv", sep="\t")
+            load("Fligner_data.RData")
+            load("BLBR_Beta.RData")
+            CpGs_old_Filter<-sapply(1:length(combat_BLBR_fligner_melt), function(x) combat_BLBR_fligner_melt[[x]][1,1])
+            correlations_BLBR_old$CpG<-CpGs_old_Filter
+                        
+            combat_BLBR_Beta<-BLBR_Beta[,which(colnames(BLBR_Beta)%in%colnames(combat_BLBR_Beta))]
+            meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+            meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+            combat_BLBR_Beta<-combat_BLBR_Beta[which(rownames(combat_BLBR_Beta)%in%CpGs_old_Filter),]
+                        
+                        
+correlations_BLBR_melt<-melt(correlations_BLBR, id="CpG")
+correlations_BLBR_melt_unadjusted<-melt(correlations_BLBR_unctype_adjusted, id="CpG")
+```
+
+
+## NULL (mean, sd and distribution)
+# Correlation Null Means and sd from 1000 permutations python BLBR_Correlation_Permutation.py script
+# Correlation Null Distribution from 10 permutations BLBR_Correlation_Permutation-10_per_500CpGs.ipynb
+```{r}
+correlations_BLBR_random1<-read.csv("~/Documents/Blood_Brain/Python/Rnd_correlations/correlation_unadjustjan22_permutation10.csv", sep="\t")
+correlations_BLBR_random2<-read.csv("~/Documents/Blood_Brain/Python/Rnd_correlations/correlation_unadjustjan22_permutation9.csv", sep="\t")
+correlations_BLBR_random3<-read.csv("~/Documents/Blood_Brain/Python/Rnd_correlations/correlation_unadjustjan22_permutation8.csv", sep="\t")
+correlations_BLBR_random4<-read.csv("~/Documents/Blood_Brain/Python/Rnd_correlations/correlation_unadjustjan22_permutation7.csv", sep="\t")
+correlations_BLBR_random5<-read.csv("~/Documents/Blood_Brain/Python/Rnd_correlations/correlation_unadjustjan22_permutation6.csv", sep="\t")
+correlations_BLBR_random<-rbind(correlations_BLBR_random1, correlations_BLBR_random2,correlations_BLBR_random3,
+                                correlations_BLBR_random4,correlations_BLBR_random5)
+save(correlations_BLBR_random, file="correlation_unadjustjan22_permutations.RData")
+
+
+load("correlation_unadjustjan22_permutations.RData")
+colnames(correlations_BLBR_random)<-c("CpG","BRAIN7","BRAIN10", "BRAIN20")
+correlations_BLBR_random_melt<-melt(correlations_BLBR_random, id="CpG")
+#correlations_BLBR_random_mn$CpG<-rownames(combat_BLBR_Beta)
+
+
+#PLot Actual
+## Correlation Histogram
+ggplot(correlations_BLBR_melt, aes(value, fill=variable))+geom_histogram(colour = "black")+theme_bw()+
+  facet_wrap(~variable, ncol=1)+scale_fill_manual(values=c("#fb6a4a","#ef3b2c","#cb181d"))
+
+ggplot(correlations_BLBR_melt_unadjusted, aes(value, fill=variable))+geom_histogram(colour = "black")+theme_bw()+
+  facet_wrap(~variable, ncol=1)+scale_fill_manual(values=c("#fb6a4a","#ef3b2c","#cb181d"))
+
+ggplot(correlations_BLBR_random_melt, aes(value, fill=variable))+geom_histogram(colour = "black")+theme_bw()+
+  facet_wrap(~variable, ncol=1)+scale_fill_manual(values=c("#fb6a4a","#ef3b2c","#cb181d"))
+
+
+# Plot all together
+correlations_BLBR_random_melt$Distribution<-"Random Permutations"
+correlations_BLBR_melt$Distribution<-"Adjusted for Cell Type"
+correlations_BLBR_melt_unadjusted$Distribution<-"Unadjusted for Cell Type"
+
+correlations_plot<-rbind(correlations_BLBR_melt,correlations_BLBR_random_melt, correlations_BLBR_melt_unadjusted)
+correlations_plot$Distribution<-as.factor(correlations_plot$Distribution)
+correlations_plot$Distribution<-factor(correlations_plot$Distribution, levels=c("Random Permutations", "Unadjusted for Cell Type","Adjusted for Cell Type"))
+
+ggplot(correlations_plot, aes(value, color=Distribution, fill=Distribution))+
+  geom_density()+theme_bw()+facet_wrap(~variable, ncol=1)+scale_fill_manual(values=c("grey80",NA,NA))+
+  scale_color_manual(values=c("grey50","#023858","#3690c0"))
+
+
+#Presentation plot
+correlations_plot_pres<-correlations_plot[which(correlations_plot$Distribution!="Unadjusted for Cell Type"),]
+
+ggplot(correlations_plot_pres, aes(value,  fill=interaction(Distribution,variable)))+
+  geom_density(color="black", alpha=0.5)+theme_bw()+facet_wrap(~variable, ncol=1)+
+  scale_fill_manual(values=c("grey","#fb6a4a","grey","#ef3b2c","grey","#cb181d"))+
+  xlab("Correlation")
+```
+
+

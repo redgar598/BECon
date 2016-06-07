@@ -1,0 +1,274 @@
+Initial Quality Control Steps
+========================================================
+
+## Libraries
+```{r}
+setwd("~/Documents/Blood_Brain/")
+library(reshape)
+library(ggplot2)
+library(RColorBrewer)
+library(mclust)
+library(IlluminaHumanMethylation450k.db)
+```
+
+## Load Data
+#### Genome fomr the methylumi all dat object
+```{r}
+load("BLBR_Beta.RData")
+```
+
+#### Any meta data
+```{r}
+meta<-read.csv("~/Documents/Blood_Brain/SampleInfo.csv")
+meta<-meta[which(meta$X%in%colnames(BLBR_Beta)),]
+meta<-meta[match(colnames(BLBR_Beta), meta$X),]
+# Added row to metadata and re-made csv
+#meta$Row<-sapply(1:nrow(meta), function(x) paste(strsplit(as.character(meta$Section[x]), "")[[1]][1:3],sep = "", collapse = ""))
+```
+
+
+### Quick PCA
+```{r}
+sample_BLBR<-as.matrix(BLBR_Beta[sample(1:nrow(BLBR_Beta),1000),])
+sample_BLBR_clean<-sample_BLBR[complete.cases(sample_BLBR),]
+pca<-(summary(prcomp(sample_BLBR_clean))$importance)[2,]
+
+#adjust
+adjust<-1-pca[1]
+pca_adjusted<-pca[2:length(pca)]/adjust
+pca_df<-data.frame(adjusted_variance=pca_adjusted, PC=seq(1:length(pca_adjusted)))
+ggplot(pca_df,aes(PC,adjusted_variance))+geom_bar(stat = "identity")+theme_bw()
+```
+
+
+# Sample CpGs for plotting and clustering
+```{r}
+Beta_sample<-BLBR_Beta[sample(1:485577, 10000),]
+```
+
+
+## Distribtuions 
+looking good? Take just a random sample of CpGs for plotting (otherwise so slow)
+```{r fig.width=10, fig.height=6}
+
+## Beta distribtuions 
+Beta_sample_melted<- melt(Beta_sample)
+#remove NAs before plotting (otherwise get many non-inifnite warnings)
+Beta_Plot<-Beta_sample_melted[which(!(is.na(Beta_sample_melted$value))),]
+#add meta
+Beta_Plot<-merge(Beta_Plot,meta, by.x="variable", by.y="X")
+
+ggplot(Beta_Plot, aes(value, group=variable, color=TissueType))+
+                   geom_density()+theme_bw()
+
+## Mval distribtuions 
+M_Plot<-Beta_Plot
+M_Plot$value<-sapply(1:nrow(M_Plot), function(x) log2(M_Plot$value[x]/(1-M_Plot$value[x])))
+ggplot(M_Plot, aes(value, group=variable, color=TissueType))+
+                   geom_density()+theme_bw()+geom_vline(xintercept=0.75)
+```
+
+
+
+# Clustering By Any Meta Data variable
+```{r fig.width=10, fig.height=3}
+# remove rows with NAs
+beta_cluster<-BLBR_Beta[complete.cases(BLBR_Beta),]
+
+meta<-meta[which(meta$X%in%colnames(BLBR_Beta)),]
+meta<-meta[match(colnames(BLBR_Beta), meta$X),]
+
+# plot clustering with color function
+    plotHclustColors <- function(matrix,leafcolor) {
+      colnames(matrix) <- leafcolor
+      d <- dist(t(matrix))
+      hc <- hclust(d, method = "complete") #single, complete, average, ward
+      color<-rep(brewer.pal(12,"Paired"),ceiling(length(unique(leafcolor))/12))
+      labelColors <- color[sample(1:length(color),length(unique(leafcolor)))]
+      colLab <- function(n) {
+        if (is.leaf(n)) {
+          a <- attributes(n)
+          labCol <- labelColors[which(unique(leafcolor) == a$label)]
+          attr(n, "nodePar") <- c(a$nodePar, lab.col=labCol)
+        }
+        n
+      }
+      clusDendro <- dendrapply(as.dendrogram(hc), colLab)
+      plot(clusDendro)
+    }
+
+
+# Plot
+plotHclustColors(beta_cluster, meta$TissueType) #all samples
+plotHclustColors(beta_cluster, meta$SubjectNumC) #all samples
+
+```
+
+
+
+
+
+
+# Genotyping Probes (show that tissues from the same individual cluster by SNPs)
+```{r}
+CpGs<- rownames(BLBR_Beta)
+SNP_Probes<-CpGs[grep("rs", CpGs)]
+SNPs<-BLBR_Beta[CpGs%in%SNP_Probes,]
+# Remove NAs (if any)
+SNPs<-SNPs[complete.cases(SNPs),]
+
+plotHclustColors(SNPs, meta$SubjectNumC) #color by individual
+```
+
+# Sexing Samples 
+```{r}
+chr <- IlluminaHumanMethylation450kCHR37
+chr <- as.data.frame(chr)
+sex<-chr[which(chr$Chromosome_37%in%c("Y","X")),]
+sex_beta<-BLBR_Beta[which(rownames(BLBR_Beta)%in%sex$Probe_ID),]
+sex_beta<-sex_beta[complete.cases(sex_beta),]
+
+
+plotHclustColors(sex_beta, meta$Gender) #color by individual
+```
+
+
+
+# Hannum 2013 mol.cell  PCA Outliers NONE
+Methylation quality control
+We used principal component (PC) analysis to identify and remove outlier samples. We
+converted each sample into a z-score statistic, based on the squared distance of its 1st PC
+from the population mean. The z-statistic was converted to a false-discovery rate using the
+Gaussian cumulative distribution and the Benjamini-Hochberg procedure (Benjamini and
+Hochberg, 1995). Samples falling below an FDR of 0.2 were designated at outliers and
+removed. This filtering procedure was performed iteratively until no samples were
+determined to be an outlier. A total of 24 samples were removed in this manner.
+```{r}
+# remove highly NA probes and impute the missing values remaining
+
+### FULL PROBES
+Beta_sample<-BLBR_Beta 
+
+#Remove probes with NA in>5% of samples
+na_count<-sapply(1:nrow(Beta_sample), function(x) sum(is.na(Beta_sample[x,])))
+length(which(na_count>(0.05*ncol(Beta_sample)))) # Probes withmore that 5% NA 
+Beta_sample<-Beta_sample[which(na_count<(0.05*ncol(Beta_sample))),]
+
+BLBR_Beta_Clean_noImpute<-Beta_sample
+save(BLBR_Beta_Clean_noImpute, file="BLBR_Beta_Clean_noImpute.RData") ### 0 probes removed
+
+
+# Impute missing beta value with mean of other samples if NA in > 5% of samples
+row.means <- rowMeans(BLBR_Beta_Clean_noImpute, na.rm=TRUE)
+k <- which(is.na(BLBR_Beta_Clean_noImpute), arr.ind=TRUE)
+BLBR_Beta_Clean_noImpute [k] <- rowMeans(BLBR_Beta_Clean_noImpute, na.rm=TRUE)[k[,1]]
+
+## NO Imputed_Probes, NO NAs
+```
+
+### PCA
+```{r}
+Beta_sample_clean<-BLBR_Beta ## FULL DATA
+
+PCA<-as.data.frame(unclass(princomp(Beta_sample_clean)$loadings))
+PCA_full<-princomp(Beta_sample_clean)
+
+meta_ordered<-meta[which(meta$SampleID%in%colnames(Beta_sample_clean)),]
+meta_ordered<-meta_ordered[match(colnames(Beta_sample_clean), meta_ordered$SampleID),]
+meta_ordered$Gender<-as.factor(meta_ordered$Gender)
+```
+
+## HEAT scree plot
+```{r}
+Loadings<-as.data.frame(unclass(PCA_full$loadings))
+vars <- PCA_full$sdev^2
+Importance<-vars/sum(vars)
+
+
+heat_scree_plot<-function(Loadings, Importance){
+  adjust<-1-Importance[1]
+  pca_adjusted<-Importance[2:length(Importance)]/adjust
+  pca_df<-data.frame(adjusted_variance=pca_adjusted, PC=seq(1:length(pca_adjusted)))
+  
+  scree<-ggplot(pca_df[which(pca_df$PC<21),],aes(PC,adjusted_variance))+geom_bar(stat = "identity",color="black",fill="grey")+theme_bw()+
+        theme(axis.text = element_text(size =12),
+              axis.title = element_text(size =15),
+              plot.margin=unit(c(1,1.5,0.2,2.25),"cm"))+ylab("Adjusted Variance")+
+    scale_x_continuous(breaks = seq(1,20,1))
+  
+  
+  #### Heat
+  ## correlate meta with PCS
+  ## Run anova of each PC on each meta data variable
+  meta$Barcode<-as.factor(meta$Barcode)
+  meta$RefrigerationDelayHrs<-as.factor(meta$RefrigerationDelayHrs)
+  meta$PH<-as.factor(meta$PH)
+  meta$Well<-as.factor(meta$Well)
+
+  meta_small<-meta[,c(4,5,7:13)] ## remove sample well because it was not working
+  aov_PC_meta<-lapply(1:ncol(meta_small), function(covar) sapply(1:ncol(Loadings), function(PC) summary(aov(Loadings[,PC]~meta_small[,covar]))[[1]]$"Pr(>F)"[1]))
+  names(aov_PC_meta)<-colnames(meta_small)
+  aov_PC_meta<-do.call(rbind, aov_PC_meta)
+  aov_PC_meta<-as.data.frame(aov_PC_meta)
+  
+  #adjust
+  aov_PC_meta_adjust<-aov_PC_meta[,2:ncol(aov_PC_meta)]
+    
+  #reshape
+  avo<-aov_PC_meta_adjust[,1:20]
+  avo_heat_num<-apply(avo,2, as.numeric)
+  avo_heat<-as.data.frame(avo_heat_num)
+  avo_heat$meta<-rownames(avo)
+  avo_heat_melt<-melt(avo_heat, id=c("meta"))
+  
+  # cluster meta data
+  ord <- c(3,5,6,7,8,1,2,9,4)
+  meta_var_order<-unique(avo_heat_melt$meta)[rev(ord)]
+  avo_heat_melt$meta <- factor(avo_heat_melt$meta, levels = meta_var_order)
+  
+  # color if sig
+  avo_heat_melt$Pvalue<-sapply(1:nrow(avo_heat_melt), function(x) if(avo_heat_melt$value[x]<=0.001){"<=0.001"}else{
+    if(avo_heat_melt$value[x]<=0.01){"<=0.01"}else{">0.01"}})
+  
+  heat<-ggplot(avo_heat_melt, aes(variable,meta, fill = Pvalue)) +
+  geom_tile(color = "black",size=0.5) +
+  theme_gray(8)+scale_fill_manual(values=c("#084594","#6baed6","#deebf7"))+
+      theme(axis.text = element_text(size =10, color="black"),
+            axis.text.x = element_text(),
+          axis.title = element_text(size =15),
+          legend.text = element_text(size =14),
+          legend.title = element_text(size =12),
+          legend.position = c(1, 0.4), legend.justification = c(1,1),
+          plot.margin=unit(c(0,2.25,1,1),"cm"))+
+    xlab("Adjusted Principle Component")+ylab(NULL)
+  
+  grid.arrange(scree, heat, ncol=1, widths = c(4, 1), heights = c(2, 4))
+}
+
+heat_scree_plot(Loadings, Importance)
+
+```
+
+## dot plots
+```{r}
+# PCA is unadjusted so start with PC2
+# but PC1 will be good to use for the hannum locfrd outlier check
+PCA_adjust_names<-PCA
+colnames(PCA_adjust_names)<-c("Comp.0",colnames(PCA)[1:69])
+# 1st (real) comp tissue
+ggplot(PCA_adjust_names,aes(Comp.1,Comp.2, size=meta_ordered$Gender, color=meta_ordered$TissueType))+geom_point(shape=19)+theme_bw()+scale_size_manual(values=c(3,5))
+
+# 2nd and 3rd component are gender (componenet are highly correlated)
+#age confounded with sex?
+ggplot(PCA_adjust_names,aes(Comp.2,Comp.3, size=meta_ordered$Age, color=meta_ordered$Gender))+geom_point(shape=19)+theme_bw()
+```
+
+# Hannum remove outliers
+```{r}
+ggplot(PCA,aes(Comp.1,Comp.2, size=meta_ordered$Gender, color=meta_ordered$TissueType))+geom_point(shape=19)+theme_bw()+scale_size_manual(values=c(3,5))
+#None look like outliers and for 17 samples locfdr isnt necessary (dist not normal at all)
+library(locfdr)
+w <- locfdr(zstat_comp1)
+w$fp0
+```
+

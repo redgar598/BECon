@@ -1,0 +1,195 @@
+---
+title: "BLBR_correlated_CpGs_interpertation"
+author: "redgar"
+date: '2015-06-24'
+output: html_document
+---
+
+Interperate the Correlated CpGs in a gene context
+```{r}
+library(ggplot2)
+library(grid)
+library(gridExtra)
+
+
+
+setwd("~/Documents/Blood_Brain/")
+load("cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates_16_All.RData") #441198     64
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta
+load("SNPCpG.RData")
+SnpatCpG<-SNPCpG[which(SNPCpG$SNPCpG!=""),]
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta_adjusted[which(!(rownames(combat_BLBR_Beta_adjusted)%in%rownames(SnpatCpG))),]
+
+#Load correlation Level with blood varibility
+load("Correlations_BLBR_blood_quantile_variation.RData") #already filtered for SNPs                        
+
+##Load top correlated CpGs
+load("Correlated_CpGs_atquantile0.275_and_corr_cutoffat_mixmodel.RData")
+Correlated_inall_brain<-intersect(Cor_CpGs[[1]],Cor_CpGs[[2]])
+Correlated_inall_brain<-intersect(Correlated_inall_brain, Cor_CpGs[[3]])
+
+#double check SnPs
+load("SNPCpG.RData")
+SnpatCpG<-SNPCpG[which(SNPCpG$SNPCpG!=""),]
+which(Correlated_inall_brain%in%rownames(SnpatCpG))#0
+```
+
+## genes 
+```{r}
+load("Gene_CpG_Relations_updatejune2015.RData")
+
+Gene_CpG_Relations_update<-Gene_CpG_Relations_update[!duplicated(Gene_CpG_Relations_update), ]
+Genes_correlated_CpGs<-Gene_CpG_Relations_update[which(Gene_CpG_Relations_update$Probe_ID%in%Correlated_inall_brain),]
+length(unique(Genes_correlated_CpGs$Probe_ID))#823 CpGs
+length(unique(Genes_correlated_CpGs$gene))#432 Genes
+Genes_correlated_CpGs<-Genes_correlated_CpGs[!duplicated(Genes_correlated_CpGs),]
+Genes_correlated_CpGs<-Genes_correlated_CpGs[!duplicated(Genes_correlated_CpGs[,c(1,4)]),]#remove duplicate CpG to gene associations
+
+Genes_correlated_CpGs_all<-Genes_correlated_CpGs
+Genes_correlated_CpGs_autosomes<-Genes_correlated_CpGs[which(!(Genes_correlated_CpGs$Chromosome_37%in%c(23,24))),]
+Genes_correlated_CpGs_sex<-Genes_correlated_CpGs[which(Genes_correlated_CpGs$Chromosome_37%in%c(23,24)),]
+```
+
+#Suprising?
+```{r}
+#suprising wiht the number of probes in the gene?
+## Gene CpG number adjustment
+load("Gene_CpG_Relations_updatejune2015.RData")
+Gene_CpG_Relations_update$gene<-as.character(Gene_CpG_Relations_update$gene)
+Overrep<-as.data.frame(tapply(Gene_CpG_Relations_update$Probe_ID, Gene_CpG_Relations_update$gene, length))
+Overrep$Gene<-rownames(Overrep)
+colnames(Overrep)<-c("CpG_number", "Gene")
+Overrep<-Overrep[which(Overrep$Gene!="None"),]
+mean(Overrep$CpG_number, na.rm=T)# 25
+Overrep$Enrichment_fromAverage<-Overrep$CpG_number/mean(Overrep$CpG_number, na.rm=T)
+
+## Gene summaries
+load("Price_annotation.RData")
+annotation$CpG<-rownames(annotation)
+format_geneTable<-function(Genes_correlated_CpGs){
+  print(paste("CpGs Associated: ", length(unique(Genes_correlated_CpGs$Probe_ID)), sep=""))
+  print(paste("Genes Associated: ", length(unique(Genes_correlated_CpGs$gene)), sep=""))
+  Overrep_subset<-as.data.frame(tapply(Genes_correlated_CpGs$Probe_ID, as.character(Genes_correlated_CpGs$gene), length))
+  Overrep_subset$Gene<-rownames(Overrep_subset)
+  colnames(Overrep_subset)<-c("CpG_number", "Gene")
+  Overrep_subset<-Overrep_subset[which(Overrep_subset$Gene!="None"),]
+  Overrep_subset_merge<-merge(Overrep_subset, Overrep, by="Gene")
+  colnames(Overrep_subset_merge)<-c("Gene","CpG_Associated","CpG_in_Gene", "Enrichment_fromAverage")
+  Overrep_subset_merge$Suprise<-Overrep_subset_merge$CpG_Associated/Overrep_subset_merge$Enrichment_fromAverage
+  Gene_table<-merge(Genes_correlated_CpGs, Overrep_subset_merge, by.x="gene", by.y="Gene")
+  Gene_table<-merge(Gene_table, annotation[,c(49,50,58)], by.x="Probe_ID", by.y="CpG")
+  
+pval<-data.frame(CpG=rownames(combat_BLBR_Beta_adjusted)[which(rownames(combat_BLBR_Beta_adjusted)%in%Gene_table$Probe_ID)],
+                 BA7_cor=correlations_BLBR_forblood$BRAIN7[which(rownames(combat_BLBR_Beta_adjusted)%in%Gene_table$Probe_ID)],
+                 BA10_cor=correlations_BLBR_forblood$BRAIN10[which(rownames(combat_BLBR_Beta_adjusted)%in%Gene_table$Probe_ID)],
+                 BA20_cor=correlations_BLBR_forblood$BRAIN20[which(rownames(combat_BLBR_Beta_adjusted)%in%Gene_table$Probe_ID)],
+                 CV_blood=correlations_BLBR_forblood$CV_blood[which(rownames(combat_BLBR_Beta_adjusted)%in%Gene_table$Probe_ID)])
+
+  Gene_table<-merge(Gene_table, pval, by.x="Probe_ID", by.y="CpG")
+  Gene_table<-Gene_table[,c(2,7,8,9,10,1,4,3,6,5,11,12,13,14,15,16)]
+  Gene_table<-Gene_table[order(-Gene_table$Suprise, Gene_table$gene),]
+Gene_table}
+
+Genes_correlated_CpGs_genes_all<-format_geneTable(Genes_correlated_CpGs_all)
+x<-unique(Genes_correlated_CpGs_genes_all$gene)
+write.csv(x, file="Correlated_Genes_atquantile0.275_and_corr_cutoffat_mixmodel.csv")
+
+Genes_correlated_CpGs_genes_autosomal<-format_geneTable(Genes_correlated_CpGs_autosomes)
+x<-unique(Genes_correlated_CpGs_genes_autosomal$gene)
+write.csv(x, file="Correlated_AutosomalChrGenes_atquantile0.275_and_corr_cutoffat_mixmodel.csv")
+
+Genes_correlated_CpGs_genes_sex<-format_geneTable(Genes_correlated_CpGs_sex)
+x<-unique(Genes_correlated_CpGs_genes_sex$gene)
+write.csv(x, file="Correlated_SexChrGenes_atquantile0.275_and_corr_cutoffat_mixmodel.csv")
+
+```
+
+
+## Xchromosme hits
+```{r}
+Genes_correlated_CpGs[which(Genes_correlated_CpGs$gene=="PM20D1"),]
+
+ChrX<-unique(Genes_correlated_CpGs$Probe_ID[which(Genes_correlated_CpGs$Chromosome_37==23)])
+
+plot<-combat_BLBR_Beta_adjusted[which(rownames(combat_BLBR_Beta_adjusted)%in%ChrX[1:16]),]
+plot$CpG<-rownames(plot)
+plot<-melt(plot, id="CpG")
+plot<-merge(plot, meta, by.x="variable", by.y="X")
+
+plot_blood<-plot[which(plot$TissueType=="PBMC"),]
+plot_BA7<-plot[which(plot$TissueType=="BRAIN7"),]
+
+plot_blood$BRAIN7<-as.numeric(plot_BA7$value)
+
+ggplot(plot_blood, aes(as.numeric(value), BRAIN7, color=as.factor(Gender)))+geom_point(shape=19)+theme_bw()+
+  facet_wrap(~CpG)
+```
+
+## Autosomal hits
+```{r}
+#for ermineJ and cytoscape
+Genes_correlated_CpGs_autosomal<-Genes_correlated_CpGs[which(!(Genes_correlated_CpGs$Chromosome_37%in%c(23,24))),]
+table(Genes_correlated_CpGs_autosomal$gene)[which(table(Genes_correlated_CpGs_autosomal$gene)>1)]
+Genes_autosomal<-unique(Genes_correlated_CpGs_autosomal$gene)
+write.csv(Genes_autosomal, file="Autosomal_genes_correlated_BLBR.csv")
+
+
+
+Probes<-Genes_correlated_CpGs[which(Genes_correlated_CpGs$gene=="OR2L13"),]$Probe_ID
+
+plot<-combat_BLBR_Beta_adjusted[which(rownames(combat_BLBR_Beta_adjusted)%in%Probes),]
+plot$CpG<-rownames(plot)
+plot<-melt(plot, id="CpG")
+plot<-merge(plot, meta, by.x="variable", by.y="X")
+
+plot_blood<-plot[which(plot$TissueType=="PBMC"),]
+plot_BA7<-plot[which(plot$TissueType=="BRAIN7"),]
+
+plot_blood$BRAIN7<-as.numeric(plot_BA7$value)
+
+ggplot(plot_blood, aes(as.numeric(value), BRAIN7, color=as.factor(Gender)))+geom_point(shape=19)+theme_bw()+
+  facet_wrap(~CpG)
+```
+
+
+#####Islands shores etc.  in BLBR_CpG_Enrichment.Rmd
+
+
+#plot top pos cor (function from BLBR_correlated_CpGs.Rmd)
+```{r}
+Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, Correlated_inall_brain[1:10])
+```
+
+
+# Pull out genes of interest
+```{r}
+DLX5<-Gene_CpG_Relations_update[grep("DLX5",Gene_CpG_Relations_update$gene),] # 47 probes in DLX5
+load("Correlations_BLBR_blood_quantile_variation.RData")
+DLX5_correlation<-correlations_BLBR_forblood[which(correlations_BLBR_forblood$CpG%in%DLX5$Probe_ID),]
+
+#load Comethylation_Plot from correlated_CpGs script
+Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, DLX5_correlation$CpG)
+hist_plot<-melt(DLX5_correlation[,1:4], id="CpG")
+hist_plot$run<-1
+hist_plot$Data<-"DLX5"
+ggplot(hist_plot, aes(value))+geom_density()+facet_wrap(~variable, ncol=1)+theme_bw()
+
+# Higher than background
+random_corr<-lapply(1:100, function(x){
+set.seed(x)
+samp_probes<-correlations_BLBR_forblood$CpG[sample(1:nrow(correlations_BLBR_forblood), length(unique(DLX5$Probe_ID)))]
+rnd_correlation<-correlations_BLBR_forblood[which(correlations_BLBR_forblood$CpG%in%samp_probes),]
+hist_plotrnd<-melt(rnd_correlation[,1:4], id="CpG")
+hist_plotrnd$run<-x
+hist_plotrnd})
+
+random_corr<-do.call(rbind,random_corr)
+random_corr$Data<-"Random"
+
+hist_plot_all<-rbind(hist_plot, random_corr)
+ggplot(hist_plot_all, aes(value, group=run, color=Data))+geom_density()+facet_wrap(~variable, ncol=1)+theme_bw()
+
+```
+
+
+

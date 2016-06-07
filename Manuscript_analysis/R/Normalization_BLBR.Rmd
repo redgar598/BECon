@@ -1,0 +1,197 @@
+Differential Methylation
+========================================================
+
+## Libraries
+```{r}
+suppressPackageStartupMessages(library(methylumi,wateRmelon,ggplot2, quietly = TRUE))
+setwd("~/Documents/Blood_Brain/")
+```
+
+
+## make the methlumi objects
+```{r}
+allFile <- ("/home/redgar/Documents/Blood_Brain/GenomeStudio_rerun/BLBR_alldat.txt") 
+qcFile <- ("/home/redgar/Documents/Blood_Brain/GenomeStudio_rerun/BLBR_QC.txt")
+betaFile <- ("/home/redgar/Documents/Blood_Brain/GenomeStudio_rerun/BLBR_avgbeta.txt") 
+
+BLBR<- lumiMethyR(allFile)
+BLBR.2 <- methylumiR(allFile, qcfile = allFile)
+save(BLBR,BLBR.2, file="BLBR_methlylumi_second.RData")
+```
+
+
+The function *lumiMethyR()* coerces the object (**allFile**) into a **MethyLumiM class object**, which contains those four elements (exprs, methylated, unmethylated, and detection p value).
+
+The function *methylumiR()* coerces the object (**betaFile**) into a **MethyLumiSet class object**, which holds the intensities and the beta values.  This is also where the sample information (the sampleFile) can be added as phenoData.
+
+
+#### Pvalues of samples on each array
+
+dont have for blbrGenomstudio run (could rerun)
+```{r}
+avgPval <- colMeans(pvals(BLBR))
+par(las = 2)
+
+barplot(avgPval, ylab = "Average P-Value", col=meta$Sample_Plate) 
+
+#p-values for detection for the samples
+meta$Det_pval<-avgPval
+
+ggplot(meta)+geom_boxplot(aes(as.factor(Barcode), Det_pval, fill=as.factor(Barcode)))+
+  geom_point(aes(as.factor(Barcode), Det_pval, group=SampleID), shape=19, color="grey70",
+             position = position_jitter(w = 0.25))+theme_bw()
+```
+
+
+# Quantro was run on kore as echelon R is too out of date (updating hard...)
+```{r}
+```
+
+
+
+# Normalization object
+```{r}
+BLBR<-BLBR.2
+dim(BLBR) # 485577      70 
+```
+
+### More probe removal
+
+## Probe removal
+## normalize
+
+
+### F. Probe Filtering, Courtesy of yours truly, Sumaiya Islam 
+
+##### Removal of SNP Probes
+We remove the SNP probes as they are used as an internal control to ensure your samples are what you think they are and are not used for any methylation analysis.
+
+
+```{r HTT_Leavitt_SNPprobes, echo=FALSE}
+BLBR <- BLBR[substring(featureNames(BLBR),1,2) != "rs", ]
+dim(BLBR) # probes = 485512, n = 70
+save(BLBR, file = "BLBR(noRS).RData") 
+```
+
+    ##### Removal of XY Probes
+    
+    We remove probes located on the X and Y chromosome in this analysis because unlike autosomes, sex chromosomes are not in equal number between females (XX) and males (XY) and if your cohort is not sex matched you will have a disproportionate number of X vs Y chromosomes present in your analysis throwing off the data of those probes.
+    
+    Here we will not remove X and Y as they may have interesting trends, since this isnt a classical lm analysis
+    
+    ```{r HTT_Leavitt_XYprobes, echo=FALSE}
+    BLBR <- BLBR[!fData(BLBR)$CHR%in%c("X", "Y"), ]
+    dim(BLBR) # probes = 471567, n = 70
+    save(BLBR, file = "BLBR(noXY).RData")
+    ```
+
+##### Cross-hybridizing probes
+
+Some probes have been found to cross-hybridize with other chromosomes (Price et al. 2013 *Epigenetics*).  It is at the discretion of the user whether or not they want to remove these cross-hybridizing probes, since it isn't a guarantee that they will cross-hybridize every time the experiment is run.  Probes that cross-hybridize to the sex chromosomes are typically removed, as they run a higher risk of confounding the data than probes that cross-hybridize to autosomal chromosomes.  
+
+We remove probes which bind multiple locations in the genome as long as one of the locations is on the XY chromosome. The reason for this is as the X and Y chromosomes are not balanced amongst our samples (males vs females) we have to remove all probes which bind them so as to not skew the normalization. We do not remove multiple binders of probes which bind at various sites only in the autosomal chromosomal regions because they will most likely not skew our normalization and when we obtain our "hit list" we will verify them using pyrosequencing in order to determine if the specific site of interest is providing the signal we are seeing.
+
+```{r}
+xy_hit_index <- which(fData(BLBR)$XY_Hits == "XY_NO")
+(n.XYcrosshybrid.probes<-(length(featureNames(BLBR))-length(xy_hit_index)))
+BLBR <- BLBR[xy_hit_index, ] 
+dim(BLBR) # probes = 473124, n = 70
+
+auto_hit_index <- which(fData(BLBR)$Autosomal_Hits== "A_NO")
+(n.autocrosshybrid.probes<-(length(featureNames(BLBR))-length(auto_hit_index)))
+BLBR <- BLBR[auto_hit_index, ] 
+dim(BLBR) # probes = 443575, n = 70
+
+
+```
+
+We have removed 42002 probes. This leaves us with 443575 probes for our analysis.
+
+
+## going to removed these after all norm etc because didn't think to do it now
+```{r}
+SNPCpG<-fData(BLBR)[,c(5,8)]
+save(SNPCpG, file="SNPCpG.RData")
+```
+
+
+
+
+# Watermelon Filter and Normalization
+# BMIQ (probe type normalization)
+    #Checks
+      #iDMR, X, Snps
+      #Replicates correlation
+      
+```{r}
+# waterMelon Bad probe filtration
+BLBR.pf<-pfilter(BLBR)
+
+    #0 samples having 1 % of sites with a detection p-value greater than 0.05 were removed 
+    #Samples removed:  
+    #1035 sites were removed as beadcount <3 in 5 % of samples 
+    #1671 sites having 1 % of samples with a detection p-value greater than 0.05 were removed 
+dim(BLBR.pf) #  441198       70 
+
+
+BLBR<-BLBR.pf
+save(BLBR, file = "BLBR(fully_filtered).RData")
+```
+
+We have removed 44379 probes. This leaves us with 441198 probes for our analysis.
+
+
+# BMIQ
+```{r}
+library(RPMM)
+bmiq_BLBR<-BMIQ(BLBR) #small number to fit for test (defult is 50000, tested with nfit=100)
+
+  # iDMR
+      # calculate iDMR metrics on QC'd betas
+      dmrse_row(BLBR) #Not normal
+      # calculate iDMR metrics on QC'd and preprocessed betas
+      dmrse_row(bmiq_BLBR) #Normal
+  # SNPs
+      # calculate SNP metrics on QC'd betas
+      genki(BLBR)
+      # calculate SNP metrics on QC'd and preprocessed betas
+      genki(bmiq_BLBR)
+  # X - chromosome Doesnt work for BMIQ?
+
+
+BLBR<-bmiq_BLBR
+dim(BLBR) # 441198      70 
+save(BLBR, file = "BLBR_prbFilter_BMIQnrm.RData")
+```
+
+## meg check
+```{r}
+BLBR_norm<-BLBR
+BLBR_norm<-betas(BLBR_norm)
+BLBR_OG<-betas(BLBR)
+```
+
+
+
+
+
+
+
+
+### Quick PCA
+```{r}
+# looks like 0.02 like EL?
+BLBR_norm<-betas(bmiq_BLBR.dasen.pf)
+BLBR_clean<-BLBR_norm[complete.cases(BLBR_norm),]
+pca<-(summary(prcomp(BLBR_clean))$importance)[2,]
+
+#adjust
+adjust<-1-pca[1]
+pca_adjusted<-pca[2:length(pca)]/adjust
+pca_df<-data.frame(adjusted_variance=pca_adjusted, PC=seq(1:length(pca_adjusted)))
+ggplot(pca_df,aes(PC,adjusted_variance))+geom_bar(stat = "identity")+theme_bw()
+
+ggplot(pca_df,aes(PC,adjusted_variance))+geom_bar(stat = "identity")+theme_bw()
+
+ggplot(pca_df[which(pca_df$PC<50),],aes(PC,adjusted_variance))+geom_bar(stat = "identity")+theme_bw()
+```

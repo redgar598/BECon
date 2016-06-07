@@ -1,0 +1,353 @@
+---
+title: "Predictions_of_brain_methylation_from_blood"
+author: "redgar"
+date: '2015-03-04'
+output: html_document
+---
+
+#load data
+```{r}
+library(ggplot2)
+library(gridExtra)
+setwd("~/Documents/Blood_Brain/")
+load("Correlations_BLBR_blood_quantile_variation.RData")
+load("cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates_16_All.RData") #441198     64
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta
+
+```
+
+
+# building a prediction of brain methylation from blood
+```{r}
+#express a Correlation as line just brain7 for now
+blood<-grep("PBMC", colnames(combat_BLBR_Beta_adjusted))
+br7<-grep("BA7", colnames(combat_BLBR_Beta_adjusted))
+br7_order<-c(2,3,1,5,4,6,9,7,8,10,11,12,13,14,15,16)
+
+
+##PLot a probe 
+correlation_plot<-data.frame(Blood=combat_BLBR_Beta_adjusted[263852,blood],
+                             Brain7=combat_BLBR_Beta_adjusted[263852,br7[br7_order]])
+
+lm_eqn = function(Blood, Brain){
+    m = lm(Blood ~ Brain);
+    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2, 
+         list(a = format(m$coefficients[1], digits = 2), 
+              b = format(m$coefficients[2], digits = 2), 
+             r2 = format(summary(m)$r.squared, digits = 3)))
+    as.character(as.expression(eq));                 
+}
+
+ggplot(correlation_plot, aes(Blood, Brain7))+geom_point(shape=19, size=2)+theme_bw()+
+  annotate("text", x = 0.25, y = 0.8, label = lm_eqn(correlation_plot$Blood, correlation_plot$Brain), parse = TRUE)+
+  geom_smooth(method = "lm", se=FALSE, color="black", formula = y ~ x)+geom_vline(x=0.34896193)
+
+
+Predict_Brain<-function(Blood_Beta){fit<-lm(correlation_plot$Blood~ correlation_plot$Brain)
+                                    slope=coef(fit)[2]
+                                    intercept=coef(fit)[1]
+                                    y=intercept+(slope*Blood_Beta)
+                                    y[[1]]}
+Predict_Brain(0.323)
+Predict_Brain(0.34896193)
+
+
+
+
+### bootstrapping
+library(boot)
+model<-glm(Blood~Brain7, correlation_plot, family=gaussian)
+summary(model)
+val.4.fold<-cv.glm(correlation_plot, model, K=4) # delta[[1]] is raw cross-validation estimate of prediction error delta[[2]] is adjusted cross-validation estimate
+# difference between the estimator and what is estimated
+val.4.fold$delta
+
+
+CpG_cross_validate_brain7_predictions<-function(CpG){
+  correlation_plot<-data.frame(Blood=combat_BLBR_Beta_adjusted[CpG,blood],
+                               Brain7=combat_BLBR_Beta_adjusted[CpG,br7[br7_order]])
+  model<-glm(Blood~Brain7, correlation_plot, family=gaussian)
+  summary(model)
+  val.4.fold<-cv.glm(correlation_plot, model, K=4)
+  val.4.fold$delta[1]
+}
+
+cross_validation_estimate_prediction_error<-sapply(1:nrow(combat_BLBR_Beta_adjusted), CpG_cross_validate_brain7_predictions)
+save(cross_validation_estimate_prediction_error, file="cross_validation_estimate_prediction_error_brain7.RData")
+
+### bootstrapping LOOCV
+library(boot)
+model<-glm(Blood~Brain7, correlation_plot, family=gaussian)
+summary(model)
+val.4.fold<-cv.glm(correlation_plot, model, K=16) # delta[[1]] is raw cross-validation estimate of prediction error delta[[2]] is adjusted cross-validation estimate
+# difference between the estimator and what is estimated
+val.4.fold$delta
+
+
+CpG_cross_validate_brain7_predictions<-function(CpG){
+  correlation_plot<-data.frame(Blood=combat_BLBR_Beta_adjusted[CpG,blood],
+                               Brain7=combat_BLBR_Beta_adjusted[CpG,br7[br7_order]])
+  model<-glm(Blood~Brain7, correlation_plot, family=gaussian)
+  summary(model)
+  val.4.fold<-cv.glm(correlation_plot, model, K=16)
+  val.4.fold$delta[1]
+}
+
+cross_validation_estimate_prediction_error<-sapply(1:nrow(combat_BLBR_Beta_adjusted), CpG_cross_validate_brain7_predictions)
+save(cross_validation_estimate_prediction_error, file="cross_validation_estimate_prediction_errorLOOCV_brain7.RData")
+
+#4 fold vs LOOCV (very correlated)
+cross_validation_estimate_prediction_error_loocv<-cross_validation_estimate_prediction_error
+load("cross_validation_estimate_prediction_error_brain7.RData")
+cross_validation_estimate_prediction_error_4fold<-cross_validation_estimate_prediction_error
+cor(cross_validation_estimate_prediction_error_4fold, cross_validation_estimate_prediction_error_loocv)
+```
+
+## correlation and prediction error are not at all correlated. I bet the least variable CpGs give the most prediction
+
+
+#which porbes show best prediction
+```{r}
+load("cross_validation_estimate_prediction_error_brain7.RData")
+load("cross_validation_estimate_prediction_errorLOOCV_brain7.RData")
+
+ #### make plot function
+Plot_blood_brain_predictability<-function(probes){
+  PLot_data<-lapply(probes, function(probe){
+      correlation_plot<-data.frame(Blood=c(as.numeric(combat_BLBR_Beta_adjusted[probe,blood])),
+                                   Brain=c(as.numeric(combat_BLBR_Beta_adjusted[probe,br7[br7_order]])),
+                                   Dataset=c(rep("Training Brain7", length(br7))),
+                                   CpG=rownames(combat_BLBR_Beta_adjusted)[probe])
+      correlation_plot})
+  PLot_data<-do.call(rbind, PLot_data)
+  ggplot(PLot_data, aes(Blood, Brain))+
+    geom_smooth(method = "lm", se=FALSE, color="black", formula = y ~ x)+
+    geom_point(color="white", fill="cornflowerblue",shape=21, size=3)+
+    theme_bw()+facet_wrap(~CpG, scales="free")}
+
+
+
+###check errors (want to minimize the prediction error)
+one_err<-1-cross_validation_estimate_prediction_error
+
+prb<-c(439429,170695)
+data.frame(CpG=rownames(combat_BLBR_Beta_adjusted)[prb], 
+           error=cross_validation_estimate_prediction_error[prb])
+PLot_data<-lapply(prb, function(probe){
+      correlation_plot<-data.frame(Blood=c(as.numeric(combat_BLBR_Beta_adjusted[probe,blood])),
+                                   Brain=c(as.numeric(combat_BLBR_Beta_adjusted[probe,br7[br7_order]])),
+                                   Dataset=c(rep("Training Brain7", length(br7))),
+                                   CpG=rownames(combat_BLBR_Beta_adjusted)[probe])})
+  PLot_data<-do.call(rbind, PLot_data)
+  ggplot(PLot_data, aes(Blood, Brain))+geom_point(shape=19, size=2)+theme_bw()+
+    geom_smooth(method = "lm", se=FALSE, color="black", formula = y ~ x)+facet_wrap(~CpG, scales="free")
+
+
+##PLot top probes 
+Predictable<-which(cross_validation_estimate_prediction_error<0.05 & 
+                     cross_validation_estimate_prediction_error>0.04 & 
+                     correlations_BLBR_forblood$CV_blood>=0.05)
+Plot_blood_brain_predictability(Predictable)
+
+# with text annotations for final
+probe=100132
+correlation_plot<-data.frame(Blood=combat_BLBR_Beta_adjusted[probe,blood],
+                             Brain7=combat_BLBR_Beta_adjusted[probe,br7[br7_order]],
+                             Probe=probe)
+ggplot(correlation_plot, aes(Blood, Brain7))+geom_point(shape=19, size=2)+theme_bw()+
+  annotate("text", x = 0.6, y = 0.9, label = lm_eqn(correlation_plot$Blood, correlation_plot$Brain), parse = TRUE)+
+  geom_smooth(method = "lm", se=FALSE, color="black", formula = y ~ x)+
+  annotate("text", x = 0.6, y = 0.88, label = round(correlations_BLBR_forblood$BRAIN7[probe], 3))
+```
+
+
+## PLot probes
+```{r}
+# want a probe that is predictabel and variable in both blood and brain 7
+load("variance_blood_brains.RData")
+br7_var<-variance_plot[which(variance_plot$Tissue=="BRAIN7"),"Variance_quantile"]
+
+# variable in blood and brain
+Predictable<-which(cross_validation_estimate_prediction_error<0.0001 & 
+                     correlations_BLBR_forblood$CV_blood>=0.15)
+
+# variable in blood and brain
+Predictable<-which(cross_validation_estimate_prediction_error<0.05 & 
+                     cross_validation_estimate_prediction_error>0.049 & 
+                     correlations_BLBR_forblood$CV_blood>=0.05&
+                     br7_var>=0.05)
+
+
+Plot_blood_brain_predictability(Predictable)
+
+# probe errors
+data.frame(CpG=rownames(combat_BLBR_Beta_adjusted)[Predictable], 
+           error=cross_validation_estimate_prediction_error[Predictable])
+
+
+
+
+## Cross validation explination
+PLot_data<-do.call(rbind, PLot_data)
+cv<-sample(1:16, 12)
+train_cv<-PLot_data[cv,]
+test_cv<-PLot_data[which(!(seq(1,16)%in%cv)),]
+test_cv$data<-"Test"
+train_cv$data<-"Train"
+plot<-rbind(test_cv, train_cv)
+ggplot()+geom_point(aes(Blood, Brain, fill=data),plot, shape=21, size=4)+theme_bw()+
+  #annotate("text", x = 0.6, y = 0.825, label = lm_eqn(plot$Blood, plot$Brain), parse = TRUE, size=5)+
+  geom_smooth(aes(Blood, Brain),PLot_data, 
+              method = "lm", se=FALSE, color="#252525", formula = y ~ x, size=1)+
+  scale_fill_manual(values=c("red", "#6baed6"), name="Cross \nValidation\nSplit")+facet_wrap(~CpG, scale="free")+
+  xlab("Blood Methylation")+ylab("Brodmann Area 7 Methylation")
+```
+
+#not predictable
+```{r}
+notPredictable<-which(cross_validation_estimate_prediction_error>0.11 & 
+                     correlations_BLBR_forblood$CV_blood>=0.05 &
+                     br7_var>=0.05)
+
+notPredictable<-which(cross_validation_estimate_prediction_error>0.1 & 
+                     correlations_BLBR_forblood$CV_blood>=0.2)
+notPredictable
+Plot_blood_brain_predictability(notPredictable)
+
+```
+
+
+
+
+## cross validation step by step
+```{r}
+CpG=2
+mean(sapply(1:4, function(fold){# average MSE
+set.seed(fold)
+sample_twelve<-sample(1:16, 12)#lm data for train
+correlation_plot<-data.frame(Blood=as.numeric(combat_BLBR_Beta_adjusted[CpG,blood])[sample_twelve],
+                             Brain7=as.numeric(combat_BLBR_Beta_adjusted[CpG,br7[br7_order]])[sample_twelve])
+Predict_Brain<-function(Blood_Beta){fit<-lm(correlation_plot$Brain~correlation_plot$Blood)
+                                    slope=coef(fit)[2]
+                                    intercept=coef(fit)[1]
+                                    y=intercept+(slope*Blood_Beta)
+                                    y[[1]]}#fit lm through train data
+correlation_test<-data.frame(Blood=as.numeric(combat_BLBR_Beta_adjusted[CpG,blood])[-sample_twelve],
+                             Brain7=as.numeric(combat_BLBR_Beta_adjusted[CpG,br7[br7_order]])[-sample_twelve])# test data
+predictions<-sapply(correlation_test$Blood, Predict_Brain)# predict brain based on blood 
+MSE<-sum((predictions-correlation_test$Brain7)^2)/length(predictions)}))
+```
+
+
+## maybe need to imcorporate a threshold for correlation and predictability
+```{r}
+correlations_BLBR<-read.csv("~/Documents/Blood_Brain/Python/correlation_jan22.csv", sep="\t")
+colnames(correlations_BLBR)<-c("CpG","BRAIN7","BRAIN10","BRAIN20")
+correlations_BLBR$CpG<-rownames(combat_BLBR_Beta)
+
+# threshold
+quantile(cross_validation_estimate_prediction_error, 0.20)
+
+Predictable<-which(abs(correlations_BLBR$BRAIN7)>0.2 &
+                     cross_validation_estimate_prediction_error<0.00004 &
+                     correlations_BLBR_forblood$CV_blood>=0.1 &
+                     br7_var>=0.1)## db cutoff too
+Plot_blood_brain_predictability(Predictable)
+
+
+## Rank sum of correlation and prediction 
+#(rank summ doesnt semm to pull correlations enough (all 0) so will nedd to weight more heavily)
+corr_Rank<-correlations_BLBR[rev(order(abs(correlations_BLBR$BRAIN7))),]
+corr_Rank$corr_Rank<-seq(1,nrow(correlations_BLBR),1)
+corr_Rank<-corr_Rank[match(correlations_BLBR$CpG, corr_Rank$CpG),]
+
+err_rank<-data.frame(CpG=rownames(combat_BLBR_Beta_adjusted), err=cross_validation_estimate_prediction_error)
+err_rank<-err_rank[order(abs(err_rank$err)),]
+err_rank$err_rank<-seq(1,nrow(err_rank),1)
+err_rank<-err_rank[match(correlations_BLBR$CpG, err_rank$CpG),]
+
+
+Rank_sum<-data.frame(CpG=rownames(combat_BLBR_Beta_adjusted),
+                     corr_rank=corr_Rank$corr_Rank,
+                     err_rank=err_rank$err_rank)
+
+Rank_sum$rank_sum<-sapply(1:nrow(Rank_sum), function(x) sum(Rank_sum$err_rank[x], 10*Rank_sum$corr_rank[x]))
+
+Predictable<-which(Rank_sum$rank_sum>4850320 &
+                     correlations_BLBR_forblood$CV_blood>=0.1 &
+                     br7_var>=0.1)## db cutoff too
+
+data.frame(CpG=rownames(combat_BLBR_Beta_adjusted)[Predictable], 
+           Correlation=correlations_BLBR$BRAIN7[Predictable],
+           error=cross_validation_estimate_prediction_error[Predictable],
+           blood_var=correlations_BLBR_forblood$CV_blood[Predictable],
+           br7_var=br7_var[Predictable])
+
+
+Plot_blood_brain_predictability(Predictable)
+
+```
+
+
+
+
+## cross validated correlation
+```{r}
+          CpG=5
+          cross_validated_correlation<-sapply(1:nrow(combat_BLBR_Beta_adjusted), function(CpG){
+            mean(sapply(1:4, function(fold){# average MSE
+              set.seed(fold)
+              sample_twelve<-sample(1:16, 12)#lm data for train
+              correlation_plot<-data.frame(Blood=as.numeric(combat_BLBR_Beta_adjusted[CpG,blood])
+                                           [sample_twelve],
+                                           Brain7=as.numeric(combat_BLBR_Beta_adjusted
+                                                             [CpG,br7[br7_order]])[sample_twelve])
+              cor(correlation_plot$Blood, correlation_plot$Brain7, use="complete.obs")}))})
+          save(cross_validated_correlation, file="BLBR_cross_validated_correlation.RData")
+            ## slightly overfit (actually most overfit porbably shouldnt use cross correlation)
+            crossval_correlated<-which(abs(cross_validated_correlation)>0.9985 &
+                                 correlations_BLBR_forblood$CV_blood>=0.1 &
+                                 br7_var>=0.1)## db cutoff too
+            Plot_blood_brain_predictability(crossval_correlated)
+```
+
+
+#Best Thresholds for correlation and prediction
+```{r}
+Var_cutoff<-0.1
+
+## really overfit
+correlated<-which(abs(correlations_BLBR_forblood$BRAIN7)>0.925 &
+                     correlations_BLBR_forblood$CV_blood>=Var_cutoff &
+                     br7_var>=Var_cutoff)## db cutoff too
+length(correlated)
+
+## Less overfit
+predictable_correlated<-which(abs(cross_validated_correlation)>0.8 &
+                             cross_validation_estimate_prediction_error<0.000445 &
+                     correlations_BLBR_forblood$CV_blood>=Var_cutoff &
+                     br7_var>=Var_cutoff)## db cutoff too
+length(predictable_correlated)
+
+
+## Informed thresholds
+    quantile(cross_validation_estimate_prediction_error, 0.4)
+    10^quantile(log(cross_validation_estimate_prediction_error), 0.40)
+    
+    x<-data.frame(err=cross_validation_estimate_prediction_error)
+    ggplot(x, aes(log(cross_validation_estimate_prediction_error)))+geom_density()+theme_bw()+geom_vline(x=-7.5)
+
+informed<-which(abs(cross_validated_correlation)>0.35 & #from mixture model
+                    cross_validation_estimate_prediction_error<0.000048  &
+                    correlations_BLBR_forblood$CV_blood>=Var_cutoff &
+                    br7_var>=Var_cutoff)## db cutoff too
+length(informed)
+
+
+
+# all at once
+grid.arrange( Plot_blood_brain_predictability(correlated),
+              Plot_blood_brain_predictability(predictable_correlated), 
+              Plot_blood_brain_predictability(informed), ncol=1)
+
+```
