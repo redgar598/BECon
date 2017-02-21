@@ -1,0 +1,381 @@
+---
+title: "BLBR_correlated_CpGs"
+author: "redgar"
+date: '2015-02-06'
+output: pdf_document
+---
+
+# Load Data
+```{r}
+setwd("/big_data/redgar/BECon")
+library(reshape)
+library(ggplot2)
+library(RColorBrewer)
+library(Biobase)
+library(mixtools)
+
+
+#just the 16 for each sample and one brain20 NA
+load("cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates_16_All.RData") #441198     64
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta
+load("SNPCpG.RData")
+SnpatCpG<-SNPCpG[which(SNPCpG$SNPCpG!=""),]### These are polymorphic CpGs!
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta_adjusted[which(!(rownames(combat_BLBR_Beta_adjusted)%in%rownames(SnpatCpG))),]
+
+## correlation values from the python code
+correlations_BLBR<-read.csv("Python/correlation_jan22.csv", sep="\t")                       
+colnames(correlations_BLBR)<-c("CpG","BRAIN7","BRAIN10","BRAIN20")
+correlations_BLBR$CpG<-rownames(combat_BLBR_Beta)
+correlations_BLBR<-correlations_BLBR[which(!(correlations_BLBR$CpG%in%rownames(SnpatCpG))),]
+```
+
+#### Any meta data
+```{r}
+meta<-read.csv("SampleInfo.csv")
+fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
+meta$X<-fix_names
+meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+```
+
+### Comethylation Plot Function
+
+```{r}
+# Comethylation Plot
+Comethylation_Plot<-function(correlations_BLBR, Betas, CpG_Hit_List){
+  hits_BLBR<-correlations_BLBR[which(correlations_BLBR$CpG%in%CpG_Hit_List),]
+  nrow(hits_BLBR)
+  hits_BLBR_PBMC_correlation_melt<-melt(hits_BLBR)
+  
+  meta$SubNumber<-as.factor(meta$SubjectNumC)
+  levels(meta$SubNumber)<-c(1:16)
+  BLBR_Beta<-as.data.frame(Betas[which(rownames(Betas)%in%CpG_Hit_List),])
+  BLBR_Beta$CpG<-rownames(BLBR_Beta)
+  BLBR_Beta<-melt(BLBR_Beta)
+  BLBR_Beta<-merge(BLBR_Beta, meta, by.x="variable", by.y="X")
+  
+  # Comparison highlight
+  hits_BLBR$max<-sapply(1:nrow(hits_BLBR), function(x) {
+    as.numeric(hits_BLBR[,c(2:4)][x,which(abs(hits_BLBR[x,c(2:4)])==max(abs(hits_BLBR[x,c(2:4)])))][1])})
+  hits_BLBR$max_abs<-abs(hits_BLBR$max)
+  
+  BLBR_Beta$line<-sapply(1:nrow(BLBR_Beta), function(x) {
+    hit<-hits_BLBR[which(hits_BLBR$CpG==BLBR_Beta$CpG[x]),]
+    region_max_corr<-colnames(hit)[c(2:4)][which(hit[1,c(2:4)]==hit$max[1])]
+    if(as.character(BLBR_Beta$TissueType[x])==region_max_corr){"Max_Correlation"}else{"Less Correlated"}})
+  
+  invisible(sapply(1:nrow(BLBR_Beta), function(x) if(BLBR_Beta$TissueType[x]=="PBMC"){
+    BLBR_Beta$line[x]<<-"Max_Correlation"}else{BLBR_Beta$line[x]<<-BLBR_Beta$line[x]}))
+  
+  #CpG order
+  order_cpg<-hits_BLBR$CpG[order(hits_BLBR$max_abs)]
+  BLBR_Beta$CpG<-as.factor(BLBR_Beta$CpG)
+  BLBR_Beta$CpG<-factor(BLBR_Beta$CpG,levels=rev(order_cpg))
+  
+  ggplot()+geom_line(aes(SubNumber, value,group=TissueType,color=TissueType,alpha=line),
+                     BLBR_Beta, size=1.5)+
+    theme_bw()+facet_wrap(~CpG)+
+    geom_text(data=hits_BLBR, aes(x=4, y=0.1, label=round(max, 2)),
+              colour="black", inherit.aes=FALSE, parse=FALSE)+
+    scale_alpha_manual(values = c(0.25, 1))+
+    scale_color_manual(values=c("#fb6a4a","#ef3b2c","#cb181d","cornflowerblue"))+
+    ylim(0,1)}
+
+```
+
+
+# Basic Comethylated CpGs (no thresholding yet)
+```{r}
+# comethylation plot
+# Top correlation in any brain region (will plot all brain regions but they may not be the exact same)
+top_discordant<-correlations_BLBR[order(correlations_BLBR$BRAIN7),]
+top_concordant<-correlations_BLBR[rev(order(correlations_BLBR$BRAIN7)),]
+
+top10discordant<-top_discordant$CpG[1:10]
+top10concordant<-top_concordant$CpG[1:10]
+
+Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, top10discordant)
+Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, top10concordant)
+```
+
+
+
+
+
+## Reference Range as the variance measure (comparable to MAD, in terms of outlier sensitivity, but going with reference range)
+```{r}
+  #Nature coomuncations paper on mQTLS
+  #We stratify results based on the inter-individual variability of the CpG sites. 
+  #Asa measure of variability, we used the 95%-reference range (the difference 
+  #betweenthe most and least methylated individuals, among 95% of the individual 
+  #formingthe central distribution of methylation values), which is less sensitive 
+  #to outliersthan the full range and more readily interpretable than the s.d.
+  Variation<-function(x) {quantile(x, c(0.9), na.rm=T)[[1]]-quantile(x, c(0.1), na.rm=T)[[1]]}
+
+
+## Just blood for varibility measure
+blood<-grep("PBMC", colnames(combat_BLBR_Beta_adjusted))
+Covariance_combat_BLBR_Beta_adjusted_blood<-sapply(1:nrow(combat_BLBR_Beta_adjusted), function(y) Variation(as.numeric(combat_BLBR_Beta_adjusted[y,blood])))
+
+correlations_BLBR_forblood<-correlations_BLBR
+correlations_BLBR_forblood$CV_blood<-Covariance_combat_BLBR_Beta_adjusted_blood
+
+#Remove SNPS
+correlations_BLBR_forblood<-correlations_BLBR_forblood[which(!(correlations_BLBR_forblood$CpG%in%rownames(SnpatCpG))),]
+save(correlations_BLBR_forblood, file="Correlations_BLBR_blood_quantile_variation.RData")
+```
+
+
+#Threshold CpGs by variance measure (No SNPs)
+```{r}
+load("Correlations_BLBR_blood_quantile_variation.RData")
+
+Cutoffs<-c(0, 0.01,0.05, 0.075,0.1,0.125,0.15,0.175,0.2, 0.225,0.25)
+
+load("Price_annotation.RData")
+Chrsex<-annotation$TargetID[which(annotation$CHR%in%c("X","Y"))]#11648
+
+correlations_BLBR_forblood_nosex<-correlations_BLBR_forblood[which(!(correlations_BLBR_forblood$CpG%in%Chrsex)),]#413466
+
+DensityPLot_blood<-lapply(Cutoffs, function(x) {
+  varible<-correlations_BLBR_forblood_nosex[which(correlations_BLBR_forblood_nosex$CV_blood>x),]
+  varible$CV_cutoff<-x
+  varible})
+N_blood<-sapply(1:length(Cutoffs), function(x) nrow(DensityPLot_blood[[x]]))
+N_blood
+DensityPLot_melt_blood<-lapply(1:length(Cutoffs), function(x) melt(DensityPLot_blood[[x]],id=c("CpG","CV_blood","CV_cutoff")))
+DensityPLot_plot_blood<-do.call(rbind, DensityPLot_melt_blood)
+
+# Plot
+col<-colorRampPalette(brewer.pal(9,"Blues"))(length(Cutoffs))
+ggplot(DensityPLot_plot_blood, aes(value, color=as.factor(CV_cutoff)))+geom_density()+
+  theme_bw()+facet_wrap(~variable, ncol=1)+scale_color_manual(values=col, name="Variance Cutoff")+
+  xlab("Correlation")+ylab("CpG Density")+ylim(0,1.60)
+```
+
+
+
+#Threshold CpGs by variance measure (SNP CpGs)
+```{r}
+# need to calculate varibility for snp cpgs (filtered in code above before)
+correlations_BLBR<-read.csv("Python/correlation_jan22.csv", sep="\t")                       
+colnames(correlations_BLBR)<-c("CpG","BRAIN7","BRAIN10","BRAIN20")
+correlations_BLBR$CpG<-rownames(combat_BLBR_Beta)
+
+Snp_correlations_BLBR<-correlations_BLBR[which(correlations_BLBR$CpG%in%rownames(SnpatCpG)),]#17814     4
+
+load("cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates_16_All.RData") #441198     64
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta
+Snp_combat_BLBR_Beta_adjusted<-combat_BLBR_Beta_adjusted[which(rownames(combat_BLBR_Beta_adjusted)%in%Snp_correlations_BLBR$CpG),]#17814    64
+
+## calculate reference range for these CpGs
+blood<-grep("PBMC", colnames(Snp_combat_BLBR_Beta_adjusted))
+Snp_Covariance_combat_BLBR_Beta_adjusted_blood<-sapply(1:nrow(Snp_combat_BLBR_Beta_adjusted), function(y){
+  Variation(as.numeric(Snp_combat_BLBR_Beta_adjusted[y,blood]))})
+Snp_correlations_BLBR$CV_blood<-Snp_Covariance_combat_BLBR_Beta_adjusted_blood
+
+Snp_correlations_BLBR_forblood<-rbind(correlations_BLBR_forblood,Snp_correlations_BLBR)#441198      5
+Cutoffs<-c(0, 0.01,0.05, 0.075,0.125,0.15,0.175,0.2, 0.225,0.25, 0.275)
+
+save(Snp_correlations_BLBR_forblood, file="SNPS_Correlations_BLBR_blood_quantile_variation.RData")
+
+
+
+load("/big_data/redgar/echelon_backup_3/Blood_Brain/SNPS_Correlations_BLBR_blood_quantile_variation.RData")
+
+DensityPLot_blood<-lapply(Cutoffs, function(x) {
+  varible<-Snp_correlations_BLBR_forblood[which(Snp_correlations_BLBR_forblood$CV_blood>x),]
+  varible$CV_cutoff<-x
+  varible})
+N_blood<-sapply(1:length(Cutoffs), function(x) nrow(DensityPLot_blood[[x]]))
+N_blood
+DensityPLot_melt_blood<-lapply(1:length(Cutoffs), function(x) melt(DensityPLot_blood[[x]],id=c("CpG","CV_blood","CV_cutoff")))
+DensityPLot_plot_blood<-do.call(rbind, DensityPLot_melt_blood)
+
+# Plot
+col<-colorRampPalette(brewer.pal(9,"Blues"))(length(Cutoffs))
+ggplot(DensityPLot_plot_blood, aes(value, color=as.factor(CV_cutoff)))+geom_density()+
+  theme_bw()+facet_wrap(~variable, ncol=1)+scale_color_manual(values=col, name="Variance Cutoff")+
+  xlab("Correlation")+ylab("CpG Density")
+
+## for the mixture model
+save(DensityPLot_blood, file="BLBR_DensityPLot_blood_referencerange_SNPs_Xchr.RData")
+
+```
+
+
+
+
+# Null Correlation from Permutations in python
+```{r}
+load("Python/correlation_jan22_permutations.RData")
+
+#remove SNPs from all 5 permutations
+correlations_BLBR_random$X<-rep(rownames(combat_BLBR_Beta),5)
+correlations_BLBR_random<-correlations_BLBR_random[which(!(correlations_BLBR_random$X%in%rownames(SnpatCpG))),]
+correlations_BLBR_random$CV_blood<-rep(correlations_BLBR_forblood$CV_blood,5)
+colnames(correlations_BLBR_random)<-c("CpG", "BRAIN7", "BRAIN10", "BRAIN20", "CV_blood")
+
+# remove sex chromosome CpG
+load("Price_annotation.RData")
+Chrsex<-annotation$TargetID[which(annotation$CHR%in%c("X","Y"))]#11648
+correlations_BLBR_random<-correlations_BLBR_random[which(!(correlations_BLBR_random$CpG%in%Chrsex)),]#413466
+
+DensityPLot_rnd<-lapply(Cutoffs, function(x) {
+  varible<-correlations_BLBR_random[which(correlations_BLBR_random$CV_blood>x),]
+  varible$CV_cutoff<-x
+  varible})
+N_rnd<-sapply(1:length(Cutoffs), function(x) nrow(DensityPLot_rnd[[x]]))
+DensityPLot_melt_rnd<-lapply(1:length(Cutoffs), function(x) melt(DensityPLot_rnd[[x]],id=c("CpG","CV_blood","CV_cutoff")))
+DensityPLot_plot_rnd<-do.call(rbind, DensityPLot_melt_rnd)
+
+# Plot
+ggplot(DensityPLot_plot_rnd[sample(1:nrow(DensityPLot_plot_rnd), 2238828),], aes(value, color=as.factor(CV_cutoff)))+geom_density()+
+  theme_bw()+facet_wrap(~variable, ncol=1)+scale_color_manual(values=col, name="Variance Cutoff")+
+  xlab("Correlation")+ylab("CpG Density")+ylim(0,1.60)
+```
+
+
+
+## Varibility threshold
+```{r}
+sex_snps<-c(as.character(Chrsex),rownames(SnpatCpG))
+length(unique(sex_snps))#32344
+SNPS_sex<-Snp_correlations_BLBR_forblood[which(Snp_correlations_BLBR_forblood$CpG%in%sex_snps),]
+NO_SNPS_sex<-Snp_correlations_BLBR_forblood[which(!(Snp_correlations_BLBR_forblood$CpG%in%sex_snps)),]
+
+mean(SNPS_sex$CV_blood)# this is the threshold
+mean(NO_SNPS_sex$CV_blood)
+```
+
+
+
+
+###### Mixture model Correlation Threshold
+```{r}
+# fit model to each brain correlation distribution (2 sub populations); at each covariance cutoff
+load("BLBR_DensityPLot_blood_referencerange_SNPs_Xchr.RData")
+mixMod<-lapply(1:length(DensityPLot_blood), function(cv) lapply(2:4, function(x) normalmixEM(DensityPLot_blood[[cv]][,x],k=2, maxit=500)))  # takes awhile 
+save(mixMod,file="mixMod_Bloodcovariancethresholds_referenceReange_SNPs_Xchr.RData")
+   
+load(file="mixMod_Bloodcovariancethresholds_referenceReange_SNPs_Xchr.RData")
+    
+# check with plot change mixMod[[#]] (s) to change series
+cv<-11 #strictest variance 0.275
+s<-3 #brain region
+pos_cor_pop<-which(mixMod[[cv]][[s]]$mu==max(mixMod[[cv]][[s]]$mu))
+plot(mixMod[[cv]][[s]],which=2,xlab2="Correlation")
+lines(density(DensityPLot_blood[[cv]][,(s+1)]), lty=2, lwd=3)
+    abline(v= mixMod[[cv]][[s]]$mu[pos_cor_pop]-(2*mixMod[[cv]][[s]]$sigma[pos_cor_pop]), col="blue", lwd=3)
+
+#correlation threshold at ae
+cor_threshold<-do.call(rbind,lapply(1:length(mixMod), function(cv) sapply(1:3, function(s) {
+  pos_cor_pop<-which(mixMod[[cv]][[s]]$mu==max(mixMod[[cv]][[s]]$mu))#select the highly positively correalted sub population(ie max mu)
+  mixMod[[cv]][[s]]$mu[pos_cor_pop]-(2*mixMod[[cv]][[s]]$sigma[pos_cor_pop])})))#what cor value is mu-2sd
+
+
+# CpG Numbers (Cor at 0.25 and reference range at 0.1; with no SNPS and no sex)
+load("Correlations_BLBR_blood_quantile_variation.RData")
+load("Price_annotation.RData")
+Chrsex<-annotation$TargetID[which(annotation$CHR%in%c("X","Y"))]#11648
+correlations_BLBR_forblood_nosex<-correlations_BLBR_forblood[which(!(correlations_BLBR_forblood$CpG%in%Chrsex)),]#413466
+
+
+
+#overlap in CpGs passing between three brain regions (Positive)
+Cor_CpGs<-lapply(1:3, function(br) correlations_BLBR_forblood_nosex$CpG[which(correlations_BLBR_forblood_nosex[,(br+1)]>=cor_threshold[11,br] & correlations_BLBR_forblood_nosex$CV>=0.1)])#CpGs Passing
+
+## how many informative in each brain region
+paste("BRAIN7 has ",length(Cor_CpGs[[1]])," informative CpGs; ", "BRAIN10 has ",length(Cor_CpGs[[2]])," informative CpGs; ", "BRAIN20 has ",length(Cor_CpGs[[3]])," informative CpGs; ", sep="")
+
+save(Cor_CpGs, file="Positively_correlated_CpGs_atreference_range_0.1_corfrom0.25_nosex_nosnp.RData")
+
+## negative
+negCor_CpGs<-lapply(1:3, function(br) correlations_BLBR_forblood_nosex$CpG[which(correlations_BLBR_forblood_nosex[,(br+1)]<=(-cor_threshold[11,br]) & correlations_BLBR_forblood_nosex$CV>=0.1)])#CpGs Passing
+
+## how many informative in each brain region
+paste("BRAIN7 has ",length(negCor_CpGs[[1]])," informative CpGs; ", "BRAIN10 has ",length(negCor_CpGs[[2]])," informative CpGs; ", "BRAIN20 has ",length(negCor_CpGs[[3]])," informative CpGs; ", sep="")
+
+save(negCor_CpGs, file="Negatively_correlated_CpGs_atreference_range_0.1_corfrom0.25_nosex_nosnp.RData")
+
+```
+
+
+
+
+### Extra Analysis for plots and metrics for the paper
+
+
+
+
+##### Meany question how many of the variable CpGs are informative
+```{r}
+load("Correlations_BLBR_blood_quantile_variation.RData")
+
+Cutoffs<-c(0, 0.01,0.05, 0.075,0.1,0.125,0.15,0.175,0.2, 0.225,0.25)
+
+load("Price_annotation.RData")
+Chrsex<-annotation$TargetID[which(annotation$CHR%in%c("X","Y"))]#11648
+
+correlations_BLBR_forblood_nosex<-correlations_BLBR_forblood[which(!(correlations_BLBR_forblood$CpG%in%Chrsex)),]#413466
+
+#overlap in CpGs passing between three brain regions
+Var_CpGs<-correlations_BLBR_forblood_nosex[which(correlations_BLBR_forblood_nosex$CV>=0.1),]# 83427 CpGs Passing
+40029/83427
+```
+
+
+
+
+
+## Write to csv for venn diagrams
+```{r}
+library(gplots) 
+
+load("Positively_correlated_CpGs_atreference_range_0.1_corfrom0.25_nosex_nosnp.RData")
+## Venn diagram
+GroupA <- Cor_CpGs[[1]]
+GroupB <- Cor_CpGs[[2]]
+GroupC <- Cor_CpGs[[3]]
+
+venn(list(BRAIN7=GroupA,BRAIN10=GroupB,BRAIN20=GroupC))
+
+# made in online program and then fixed in inkscape
+write.csv(Cor_CpGs[[1]], file="Figures/Venn/BRAIN7.csv")
+write.csv(Cor_CpGs[[2]], file="Figures/Venn/BRAIN10.csv")
+write.csv(Cor_CpGs[[3]], file="Figures/Venn/BRAIN20.csv")
+
+
+
+load("Negatively_correlated_CpGs_atreference_range_0.1_corfrom0.25_nosex_nosnp.RData")
+## Venn diagram
+GroupA <- negCor_CpGs[[1]]
+GroupB <- negCor_CpGs[[2]]
+GroupC <- negCor_CpGs[[3]]
+
+venn(list(BRAIN7=GroupA,BRAIN10=GroupB,BRAIN20=GroupC))
+
+# made in online program and then fixed in inkscape
+write.csv(negCor_CpGs[[1]], file="Figures/Venn/negBRAIN7.csv")
+write.csv(negCor_CpGs[[2]], file="Figures/Venn/negBRAIN10.csv")
+write.csv(negCor_CpGs[[3]], file="Figures/Venn/negBRAIN20.csv")
+
+```
+
+
+## presentation plot invariable probes (plot to justify the varibility thresholding)
+```{r}
+invar_poscor<-correlations_BLBR_forblood$CpG[which(correlations_BLBR_forblood[,2]>=0.7 & correlations_BLBR_forblood$CV<=0.005)]#CpGs Passing
+Comethylation_Plot(correlations_BLBR_forblood,combat_BLBR_Beta_adjusted, invar_poscor)
+```
+
+
+## presentation plot uncorrelated but variable probes
+```{r}
+uncor<-correlations_BLBR_forblood
+uncor$Max<-sapply(1:nrow(correlations_BLBR_forblood), function(x) max(abs(correlations_BLBR_forblood[x,2:4])))
+
+var_uncor<-correlations_BLBR_forblood$CpG[which(abs(uncor$Max)<0.025 & 
+                                                  correlations_BLBR_forblood$CV>=0.2)]#CpGs Passing
+Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, var_uncor[1:4])
+```

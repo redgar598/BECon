@@ -1,0 +1,302 @@
+Post Normalization Repeat of Quality Control Steps
+========================================================
+  
+## Libraries
+```{r}
+setwd("/big_data/redgar/BECon")
+library(reshape)
+library(ggplot2)
+library(RColorBrewer)
+library(mclust)
+suppressMessages(library(IlluminaHumanMethylation450k.db))
+library(grid)
+library(gridExtra)
+```
+
+## Load Data and fix sample names with spaces
+#### Normalized (BMIQ  and probe filtered)
+```{r}
+load("BLBR_prbFilter_BMIQnrm.RData")
+BLBR_Beta<-betas(BLBR)
+BLBR_Beta<-as.data.frame(BLBR_Beta)
+fix_names<-unlist(lapply(colnames(BLBR_Beta), function(x) gsub(" ","", x , fixed=TRUE)))
+colnames(BLBR_Beta)<-fix_names
+save(BLBR_Beta, file="BLBR_norm_filtered.RData")
+```
+
+## Load Data
+```{r}
+load("BLBR_norm_filtered.RData")
+```
+
+
+#### Load meta data and match with beta data
+```{r}
+meta<-read.csv("SampleInfo.csv")
+fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
+meta$X<-fix_names
+meta<-meta[which(meta$X%in%colnames(BLBR_Beta)),]
+meta<-meta[match(colnames(BLBR_Beta), meta$X),]
+```
+
+
+
+### Exploratory Checks
+
+# Sample CpGs for plotting and clustering
+```{r}
+Beta_sample<-BLBR_Beta[sample(1:nrow(BLBR_Beta), 10000),]
+```
+
+
+## Beta distribtuions 
+looking good? Take just a random sample of CpGs for plotting (otherwise so slow)
+```{r fig.width=10, fig.height=6}
+Beta_sample_melted<- melt(Beta_sample)
+#remove NAs before plotting (otherwise get many non-inifnite warnings)
+Beta_Plot<-Beta_sample_melted[which(!(is.na(Beta_sample_melted$value))),]
+#add meta
+Beta_Plot<-merge(Beta_Plot,meta, by.x="variable", by.y="SampleID")
+
+ggplot(Beta_Plot, aes(value, group=variable, color=TissueType))+
+  geom_density()+theme_bw()+ guides(color=FALSE) 
+
+## Mval distribtuions 
+M_Plot<-Beta_Plot
+M_Plot$value<-sapply(1:nrow(M_Plot), function(x) log2(M_Plot$value[x]/(1-M_Plot$value[x])))
+# BMIQ is pushing 1842 values to a beta of 4.17969e-05 (M -14.54618) for some reason
+ggplot(M_Plot, aes(value, group=variable, color=TissueType))+
+                   geom_density()+theme_bw()+xlim(-10,10)
+```
+
+
+# Clustering By Any Meta Data variable
+```{r fig.width=10, fig.height=3}
+# remove rows with NAs
+beta_cluster<-Beta_sample[complete.cases(Beta_sample),]
+
+# plot clustering with color function
+plotHclustColors <- function(matrix,leafcolor) {
+  colnames(matrix) <- leafcolor
+  d <- dist(t(matrix))
+  hc <- hclust(d, method = "complete") #single, complete, average, ward
+  color<-rep(brewer.pal(12,"Paired"),ceiling(length(unique(leafcolor))/12))
+  labelColors <- color[sample(1:length(color),length(unique(leafcolor)))]
+  colLab <- function(n) {
+    if (is.leaf(n)) {
+      a <- attributes(n)
+      labCol <- labelColors[which(unique(leafcolor) == a$label)]
+      attr(n, "nodePar") <- c(a$nodePar, lab.col=labCol)
+    }
+    n
+  }
+  clusDendro <- dendrapply(as.dendrogram(hc), colLab)
+  plot(clusDendro)
+}
+
+# Plot
+plotHclustColors(beta_cluster, meta$TissueType) #all samples
+plotHclustColors(beta_cluster, meta$SubjectNumC) #all samples
+```
+
+
+
+
+## PCA correlation with meta data, initial heat scree plot
+```{r}
+source("BECon_scripts/Heat_scree_plot.R")
+
+
+# PCA
+PCA_full<-princomp(BLBR_Beta[complete.cases(BLBR_Beta),]) # only using the 417619 complete rows for PCA
+Loadings<-as.data.frame(unclass(PCA_full$loadings))
+vars <- PCA_full$sdev^2
+Importance<-vars/sum(vars)
+
+
+#Restructure meta
+meta$Barcode<-as.factor(meta$Barcode)
+
+meta_categorical <- meta[, c(4,5,7,9,13)]  # input column numbers in meta that contain categorical variables
+meta_continuous <- meta[, c(10,11,12)]  # input column numbers in meta that contain continuous variables
+colnames(meta_categorical) <- c("Barcode", "Section", "Tissue Type","Gender","Array Row")
+colnames(meta_continuous) <- c("Age", "PH", "Refrigeration Delay Hours")
+
+ord<-1:length(c(colnames(meta_categorical),colnames(meta_continuous)))
+
+# how far do you want the plot to go?
+PCs_to_view<-10
+
+
+heat_scree_plot(Loadings, Importance)
+```
+
+
+## PC plot 
+```{r}
+# Comp 1 (or 0) and 2 (or 1) are tissue
+ggplot(Loadings,aes(Comp.2,Comp.3, color=meta$TissueType))+geom_point(shape=19,size=4 )+theme_bw()+
+  xlab("PC1 (74.7%)")+ylab("PC2 (5.5%)")+scale_color_manual(values=c("#a50f15","#ef3b2c",
+                                                                   "#fc9272","cornflowerblue"),
+                                                          name="Tissue")
+
+## no idea what comp3 is, need sva? looks like it is something to do specifically with brain (but not brain region)
+ggplot(Loadings,aes(Comp.3,Comp.4, color=as.factor(meta$Gender)))+geom_point(shape=19,size=4 )+theme_bw()+
+    xlab("PC2 (5.5%)")+ylab("PC3 (4.2%)")+scale_color_manual(values=c("#f46d43","#66bd63"),
+                                                          name="Gender")
+
+ggplot(Loadings,aes(Comp.5,Comp.6, color=meta$Age))+geom_point(shape=19,size=4 )+theme_bw()+
+  xlab("PC4 (2.1%)")+ylab("PC5 (1.0%)")+guides(color=guide_legend(title="Age"))
+
+
+# age in 4th and 5th
+ggplot(Loadings,aes(Comp.4,Comp.5, color=meta$Age))+geom_point(shape=19,size=3 )+theme_bw()
+
+# PH and RefrigerationDelayHrs are in many of the PCs should they be removed with combat or included in the linear model?
+```
+
+
+#Combat
+```{r}
+library(sva)
+library(pamr)
+library(limma)
+Mval<-function(beta) log2(beta/(1-beta))
+
+# BLBR data
+pheno = meta
+edata = apply(BLBR_Beta, 1, Mval) # need mvalues for combat
+edata = as.data.frame(edata)
+edata = t(edata)
+
+
+pheno$Barcode<-as.factor(pheno$Barcode)
+pheno$PH<-as.factor(pheno$PH)
+pheno$RefrigerationDelayHrs<-as.factor(pheno$RefrigerationDelayHrs)
+
+#Combat
+mod = model.matrix(~as.factor(TissueType), data=pheno)
+
+#Plate Row and section NOT in top 20 PC
+
+#Barcode
+batch = pheno$Barcode
+combat_BLBR_Beta = ComBat(dat=edata, batch=batch, mod=mod, numCovs=NULL, par.prior=TRUE)
+#RefrigerationDelayHrs
+batch = pheno$RefrigerationDelayHrs
+combat_BLBR_Beta = ComBat(dat=edata, batch=batch, mod=mod, numCovs=NULL, par.prior=TRUE)
+#PH
+batch = pheno$PH
+combat_BLBR_Beta = ComBat(dat=edata, batch=batch, mod=mod, numCovs=NULL, par.prior=TRUE)
+
+#Back to betas
+betas<-function(M) 2^M/((2^M)+1)
+combat_BLBR_Beta2 = apply(combat_BLBR_Beta, 1, betas) # need mvalues for combat
+combat_BLBR_Beta2 = as.data.frame(combat_BLBR_Beta2)
+combat_BLBR_Beta2 = t(combat_BLBR_Beta2)
+combat_BLBR_Beta<-combat_BLBR_Beta2
+
+save(combat_BLBR_Beta, file="BLBR_Beta_Combatted_Mval_bmiqonly.RData")
+```
+
+
+
+# Compare Pre and post normalization and combat REPLICATES
+```{r}
+load("BLBR_methlylumi_second.RData")#original
+load("BLBR_norm_filtered.RData") # BMIQ
+load("BLBR_Beta_Combatted_Mval_bmiqonly.RData") # Includes replicates
+
+
+beta_BLBR.2<-betas(BLBR.2)
+colnames(beta_BLBR.2)<-colnames(combat_BLBR_Beta)
+beta_BLBR.2_bmiq<-BLBR_Beta
+
+meta$SampleID<-colnames(beta_BLBR.2)
+replicates<-data.frame(Sample_ID=meta$SampleID[which(meta$Replicate=="Y")],
+                       X=meta$X[which(meta$Replicate=="Y")])
+replicates$Pair<-c("PBMC169","BA7250","PBMC250","BA7250","BA10248","PBMC169","BA10248","PBMC250")
+                   
+
+original_rep<-beta_BLBR.2[,which(colnames(beta_BLBR.2)%in%replicates$Sample_ID)]
+bmiq_rep<-beta_BLBR.2_bmiq[,which(colnames(beta_BLBR.2_bmiq)%in%replicates$Sample_ID)]
+combat_rep<-combat_BLBR_Beta[,which(colnames(combat_BLBR_Beta)%in%replicates$Sample_ID)]
+
+
+## RMSE
+library(hydroGOF)
+Data_cors<-function(df) {data.frame(Comparison=c("PBMC169", "BA7250",  "PBMC250", "BA10248"), 
+                                    Correlation=c(rmse(df[,1],df[,6], use="complete.obs"),
+                                                  rmse(df[,2],df[,4], use="complete.obs"),
+                                                  rmse(df[,3],df[,8], use="complete.obs"),
+                                                  rmse(df[,5],df[,7], use="complete.obs")))}
+
+original_rep_cor<-Data_cors(original_rep)
+bmiq_rep_cor<-Data_cors(bmiq_rep)
+combat_rep_cor<-Data_cors(combat_rep)
+
+original_rep_cor$Data<-"Original"
+bmiq_rep_cor$Data<-"BMIQ Norm"
+combat_rep_cor$Data<-"BMIQ Norm Combat"
+
+rep_cor<-rbind(original_rep_cor,bmiq_rep_cor,combat_rep_cor)
+rep_cor$Data <- factor(rep_cor$Data, levels=c("Original","BMIQ Norm", "BMIQ Norm Combat"))
+
+ggplot(rep_cor, aes(Data, Correlation, group=Comparison, color=Comparison))+geom_line(size=2)+theme_bw()+ylab("Root Mean Square Error")+
+  scale_color_manual(values=c("#cb181d","#fb6a4a","#0570b0","cornflowerblue"))+xlab("")
+```
+
+
+# Remove Replicates
+```{r}
+rm_replicates<-c("BA7250rep", "PBMC169rep", "BA102482", "PBMC250rep")
+combat_BLBR_Beta<-combat_BLBR_Beta[,which(!(colnames(combat_BLBR_Beta)%in%rm_replicates))]# 460199 n=66
+```
+
+# PCA after COMBAT
+```{r}
+meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+
+PCA_full_combat<-princomp(combat_BLBR_Beta[complete.cases(combat_BLBR_Beta),])
+Loadings_combat<-as.data.frame(unclass(PCA_full_combat$loadings))
+vars_combat <- PCA_full_combat$sdev^2
+Importance_combat<-vars_combat/sum(vars_combat)
+
+meta$Barcode<-as.factor(meta$Barcode)
+
+meta_categorical <- meta[, c(4,5,7,9,13)]  # input column numbers in meta that contain categorical variables
+meta_continuous <- meta[, c(10,11,12)]  # input column numbers in meta that contain continuous variables
+colnames(meta_categorical) <- c("Barcode", "Section", "Tissue Type","Gender","Array Row")
+colnames(meta_continuous) <- c("Age", "PH", "Refrigeration Delay Hours")
+
+PCs_to_view<-10
+
+heat_scree_plot(Loadings_combat, Importance_combat)
+```
+
+
+## meta data correlation
+```{r}
+Meta_correlation<-lapply(c(4:13), function(x) as.numeric(meta[,x]))
+Meta_correlation<-as.data.frame(do.call(cbind, Meta_correlation))
+colnames(Meta_correlation)<-colnames(meta)[4:13]
+
+correlation<-cor(Meta_correlation, use="complete.obs", method="spearman") 
+correlation_melt<-melt(correlation)
+cols <- brewer_pal(pal = "RdBu")(5)
+
+
+ggplot(correlation_melt, aes(X1,X2, fill = value)) +
+  geom_tile(color = "black",size=0.5) +
+  theme_gray(8)+theme(axis.text = element_text(size =10, color="black"),
+          axis.title = element_text(size =15),
+          axis.text.x = element_text(angle = 90, hjust = 1))+
+  scale_fill_gradientn(colours = cols, 
+                         values = rescale(c(-0.65, 0,0.65)),
+                         guide = "colorbar", limits=c(-0.65, 0.65))
+```
+
+
+
+

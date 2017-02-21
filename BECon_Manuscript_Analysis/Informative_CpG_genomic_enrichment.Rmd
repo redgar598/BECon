@@ -1,0 +1,58 @@
+---
+title: "BLBR_Enrichment"
+author: "redgar"
+date: '2015-02-24'
+output: html_document
+---
+
+
+#Permutation P values
+```{r}
+setwd("/big_data/redgar/BECon")
+library(ggplot2)
+library(reshape)
+library(RColorBrewer)
+library(grid)
+library(gridExtra)
+library(RCurl)
+library(gtools)
+
+
+load("/big_data/redgar/BECon/cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates_16_All.RData") #441198     64
+combat_BLBR_Beta_adjusted<-combat_BLBR_Beta
+
+# Correlated CpGs
+load("/big_data/redgar/BECon/Positively_correlated_CpGs_atreference_range_0.1_corfrom0.25_nosex_nosnp.RData")
+pos_overlap<-intersect(Cor_CpGs[[1]],Cor_CpGs[[2]])
+pos_overlap<-intersect(pos_overlap,Cor_CpGs[[3]])
+Cor_CpGs<-unique(unlist(Cor_CpGs))
+
+load("/big_data/redgar/BECon/Negatively_correlated_CpGs_atreference_range_0.1_corfrom0.25_nosex_nosnp.RData")
+neg_overlap<-intersect(negCor_CpGs[[1]],negCor_CpGs[[2]])
+neg_overlap<-intersect(neg_overlap,negCor_CpGs[[3]])
+negCor_CpGs<-unique(unlist(negCor_CpGs))
+
+
+#load in the annotations (for Genes and CGIs)
+load("Gene_annotation/Gene_CpG_Relations_updatejune2015.RData")
+load("Price_annotation.RData") #annotations based on Price et al. 2013 Epigenetics & Chromatin
+annotation$CpG<-rownames(annotation)
+
+#pull in the big function in the other script
+source("BECon_scripts/Gene_enrichment_fold_change_permutation_pvalue_function.R")
+
+
+# define background of CpGs (whatever you filtered the 485577 down to for this analysis) and the CpG list of interest (hits)
+background.cor<-rownames(combat_BLBR_Beta_adjusted)
+pos_informative_CpGs<-Cor_CpGs
+neg_informative_CpGs<-negCor_CpGs
+
+
+## plot fold enrichment and the permutation pvalues
+#take the hit list, the background, and the number of permutations
+CGI_Gene_permutation_enrichment(pos_informative_CpGs,background.cor, 10000, -3.25,2)
+CGI_Gene_permutation_enrichment(neg_informative_CpGs,background.cor, 10000, -3.25,2)
+
+
+```
+

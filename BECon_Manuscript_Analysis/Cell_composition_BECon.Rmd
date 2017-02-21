@@ -1,0 +1,294 @@
+Blood Cell Composition
+========================================================
+
+# Correlate sample methylation signals with each blood type
+Gran:neutrophils (granulocytes)
+CD8T: CD8+ T cells 
+CD4T: CD4+ T cells
+NK: CD56+ natural killer cells 
+Bcell: CD19+ B cells
+
+## Libraries
+```{r}
+setwd("/big_data/redgar/BECon/")
+library(reshape)
+library(ggplot2)
+library(RColorBrewer)
+library(mclust)
+```
+
+## Load combatted data with no replicates
+```{r}
+load("BLBR_Beta_Combatted_Mval_bmiqonly.RData") #441198     70
+```
+
+#### Any meta data
+```{r}
+meta<-read.csv("SampleInfo.csv")
+fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
+meta$X<-fix_names
+meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+```
+
+### Blood cell composition with minfi hack (ECC2.R)
+```{r}
+library(FlowSorted.Blood.450k)
+library(IlluminaHumanMethylation450kmanifest)
+library(quadprog)
+
+RGset = as.data.frame(combat_BLBR_Beta)
+
+source("BECon_scripts/ECC2.R")
+
+cellprop2 <- ECC2(RGset)
+cellprop<-as.data.frame(cellprop2$counts)
+cellprop$Sample<-rownames(cellprop)
+
+save(cellprop, file="BLBR_cell_proportions_Mcombat_bmiqonly.RData")
+
+
+
+
+# # PLot
+# PBMC_meta<-subset(meta, TissueType=="PBMC")
+# cellprop_PBMC<-cellprop[which(rownames(cellprop)%in%PBMC_meta$X),]
+# cellprop_melt<-melt(cellprop_PBMC, id="Sample")
+# ggplot(cellprop_melt, aes(variable, value))+
+#   geom_point(shape=19, position = position_jitter(w = 0.1))+theme_bw()+scale_color_manual(values=c("grey","red"))+xlab("Sample")+ylab("Cell Type Proportion")
+```
+
+
+
+
+## Megan Jones' code to correct for cell type, and get adjusted betas
+```{r}
+Blood_beta<-combat_BLBR_Beta[,which(colnames(combat_BLBR_Beta)%in%PBMC_meta$X)]
+
+# Impute NAs
+imputeMedianv3<-function(x) apply(x, 1, function(x){x[is.na(x)]<-median(x, na.rm=T); x}) #impute with row mean
+Blood_beta_imputed<-t(imputeMedianv3(Blood_beta))
+
+
+avebeta.lm<-apply(Blood_beta_imputed, 1, function(x){
+  cellprop_PBMC[colnames(Blood_beta_imputed),]->blood
+  lm(x~CD8T+CD4T+NK+Bcell+Mono,data=blood)
+})
+residuals<-t(sapply(avebeta.lm, function(x)residuals(summary(x))))
+colnames(residuals)<-colnames(Blood_beta_imputed)
+adj.residuals<-residuals+matrix(apply(Blood_beta_imputed, 1, mean), nrow=nrow(residuals), ncol=ncol(residuals))
+save(adj.residuals, file="adjusted_betas_blood_Mcombat_bmiqonly.RData")
+
+
+
+
+# do composition again (so can see the normalization effect after adjustment)
+RGset = as.data.frame(adj.residuals)
+source("BECon_scripts/ECC2.R")
+
+cellprop2 <- ECC2(RGset)
+cellprop_adjusted<-as.data.frame(cellprop2$counts)
+cellprop_adjusted$Sample<-rownames(cellprop_adjusted)
+save(cellprop_adjusted, file="cellprop_adjusted_Mcombat_bmiqonly.RData")
+```
+
+
+
+
+
+
+#### CETS for BRAIN
+HTT_Leavitt CETS Brain Cell Type Correction
+========================================================
+## By: Sumaiya Islam
+## Date: September 29, 2014
+
+### Script contents:
+- CETS brain cell type correction for normalized, combat-corrected cortex-only dataset (n = 13)
+- CETS brain cell type correction for cortex samples (n = 5) of normalized matched dataset
+- CETS brain cell type correction for normalized entire dataset (n = 18)
+
+##### We will use an open-source R package, Cell EpigenoType Specific (CETS) mapper, designed for the quantification and normalization of differing neuronal proportions in genome-scale DNA methylation datasets. The application of CETS quantification and transformation can reduce cell type heterogeneity and improve replicability of epigenetic findings in the brain across cohorts. It is important to correct for differences in cell type proportions in methylation data as these differences can lead to false discoveries in the methylation analysis (Guintivano et al 2013 *Epigenetics*).
+
+We will initially set our working directory and load our libraries.
+
+```{r}
+install.packages("BECon_scripts/cets_0.99.2.tar.gz",repos = NULL, type="source")
+```
+
+
+```{r}
+library(cets)
+library(wateRmelon)
+library(lumi)
+```
+
+```{r}
+# load cortex only dataset (after normalization and ComBat)
+load("BLBR_Beta_Combatted_Mval_bmiqonly.RData") #460199     70
+meta<-read.csv("SampleInfo.csv")
+fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
+meta$X<-fix_names
+meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
+meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+
+BLBR_brain_betas<-combat_BLBR_Beta[,which(meta$TissueType!="PBMC")]
+meta_brain<-meta[which(meta$X%in%colnames(BLBR_brain_betas)),]
+meta_brain<-meta_brain[match(colnames(BLBR_brain_betas), meta_brain$X),]
+```
+
+
+Load calibration data set
+
+The calibration dataset included in the cetsBrain package contains FACS-sorted neuron and glia samples from a cohort of depression patients and control subjects. The package contains two objects: A data matrix (brain) of sample methylation profiles for the top 10,000 most differentially methylated probes between neurons and glia and (pdBrain) a sample annotation data frame:
+
+```{r}
+# load "brain dataset" from data file in cetsBrain
+load("BECon_scripts/cetsBrain/data/cetsBrain.rda") # click on cetsBrain.rda file to place in workspace
+```
+
+
+Create the neuron and glia reference profiles:
+```{r}
+modelIdx <- list(neuron = pdBrain$celltype == "N", glia = pdBrain$celltype ==  "G")
+ # getReference returns a 2-column matrix, representing reference profiles for the two cell types.
+refProfile <- getReference(brain, modelIdx)
+```
+
+Estimate the neuronal proportion:
+
+The estProportion function returns an estimate of the percentage of cell type in the first column of its profile argument (neurons in this case). 
+```{r}
+prop <- estProportion(BLBR_brain_betas, profile = refProfile)
+prop<-as.data.frame(prop)
+prop$glia<-apply(prop,1,function(x) 1-x)
+colnames(prop)<- c("neuron", "glia")
+
+save(prop, file="Brain_cell_composition_Mcombat_bmiqonly.RData")
+
+# Plot
+prop$sample<-rownames(prop)
+porp_melt<-melt(prop)
+prop_merge<-merge(porp_melt, meta_brain, by.x="sample", by.y="X")
+
+ggplot(prop_merge, aes(variable, value, color=TissueType))+
+  geom_point(shape=19, position=position_jitter(width=0.15))+
+  theme_bw()+
+  scale_color_manual(values=c("#fb6a4a","#ef3b2c","#cb181d"))
+```
+
+
+We will now perform cell-type correction based on the neuronal/glial proportions 
+
+```{r}
+# fit methylation data for each probe in the dataset by the neuronal proportion
+
+# Impute NAs
+imputeMedianv3<-function(x) apply(x, 1, function(x){x[is.na(x)]<-median(x, na.rm=T); x}) #impute with row mean
+BLBR_brain_betas_imputed<-t(imputeMedianv3(BLBR_brain_betas))
+
+# Split by Brain Region (for normalization of composition because brain regions have different proportions and thats fine)
+BR7_betas_imputed<-BLBR_brain_betas_imputed[,which(colnames(BLBR_brain_betas_imputed)%in%
+                                                    meta_brain$X[which(meta_brain$TissueType=="BRAIN7")])]
+BR10_betas_imputed<-BLBR_brain_betas_imputed[,which(colnames(BLBR_brain_betas_imputed)%in%
+                                                    meta_brain$X[which(meta_brain$TissueType=="BRAIN10")])]
+BR20_betas_imputed<-BLBR_brain_betas_imputed[,which(colnames(BLBR_brain_betas_imputed)%in%
+                                                    meta_brain$X[which(meta_brain$TissueType=="BRAIN20")])]
+
+#Adjust Betas for cell types
+Adjust<-function(BR){
+avebeta.lm<-apply(BR, 1, function(x){ ## FULL Adjustment!
+    brain.sub<-prop[colnames(BR),]
+    lm(x~neuron,data=brain.sub)
+  })
+  residuals<-t(sapply(avebeta.lm, function(x)residuals(summary(x))))
+  colnames(residuals)<-colnames(BR)
+  adj.residuals<-residuals+matrix(apply(BR, 1, mean), nrow=nrow(residuals), ncol=ncol(residuals))
+adj.residuals}
+
+BR7_adjusted<-Adjust(BR7_betas_imputed)
+BR10_adjusted<-Adjust(BR10_betas_imputed)
+BR20_adjusted<-Adjust(BR20_betas_imputed)
+
+adj.residuals<-cbind(BR7_adjusted, BR10_adjusted, BR20_adjusted)
+
+adj.residuals<-adj.residuals[,match(meta_brain$X, colnames(adj.residuals))]
+
+## Adjusted betas
+save(adj.residuals, file="adjusted_betas_brain_Mcombat_bmiqonly_sepBrainregion.RData")
+
+
+
+
+# do composition again (so can see the normalization effect after adjustment)
+prop_adjusted<- estProportion(adj.residuals, profile = refProfile)
+prop_adjusted<-as.data.frame(prop_adjusted)
+prop_adjusted$glia<-apply(prop_adjusted,1,function(x) 1-x)
+colnames(prop_adjusted)<- c("neuron", "glia")
+save(prop_adjusted, file="cellprop_brain_adjusted_Mcombat_bmiqonly_sepBrainregion.RData") 
+```
+
+  
+
+##Compare PLot ALL
+```{r}
+#Brain
+load("Brain_cell_composition_Mcombat_bmiqonly.RData")
+load("cellprop_brain_adjusted_Mcombat_bmiqonly_sepBrainregion.RData")
+meta_brain<-subset(meta, TissueType!="PBMC")
+cellprop_brain<-prop[which(rownames(prop)%in%meta_brain$SampleID),]
+meta_brain<-meta_brain[which(meta_brain$SampleID%in%rownames(prop)),]
+cellprop_brain$Sample<-rownames(cellprop_brain)
+cellprop_brain$Region<-meta_brain$TissueType
+cellprop_melt<-melt(cellprop_brain, id=c("Sample","Region"))
+cellprop_melt$Data<-"unadjusted"
+cellprop_brain_adjusted<-prop_adjusted[which(rownames(prop_adjusted)%in%meta_brain$SampleID),]
+cellprop_brain_adjusted$Sample<-rownames(cellprop_brain_adjusted)
+cellprop_brain_adjusted$Region<-meta_brain$TissueType
+cellprop_melt_adjusted<-melt(cellprop_brain_adjusted, id=c("Sample","Region"))
+cellprop_melt_adjusted$Data<-"adjusted"
+cellprop_melt_brain<-rbind(cellprop_melt, cellprop_melt_adjusted)
+cellprop_melt_brain$Tissue<-"Brain"
+cellprop_melt_brain$Data <- factor(cellprop_melt_brain$Data,c("unadjusted", "adjusted"))
+
+#Blood
+load("BLBR_cell_proportions_Mcombat_bmiqonly.RData")
+load("cellprop_adjusted_Mcombat_bmiqonly.RData")
+PBMC_meta<-subset(meta, TissueType=="PBMC")
+cellprop_PBMC<-cellprop[which(rownames(cellprop)%in%PBMC_meta$SampleID),]
+cellprop_melt<-melt(cellprop_PBMC, id="Sample")
+cellprop_melt$Data<-"unadjusted"
+cellprop_PBMC_adjusted<-cellprop_adjusted[which(rownames(cellprop_adjusted)%in%PBMC_meta$SampleID),]
+cellprop_melt_adjusted<-melt(cellprop_PBMC_adjusted, id="Sample")
+cellprop_melt_adjusted$Data<-"adjusted"
+cellprop_melt_blood<-rbind(cellprop_melt, cellprop_melt_adjusted)
+cellprop_melt_blood$Tissue<-"Blood"
+cellprop_melt_blood$Data <- factor(cellprop_melt_blood$Data,c("unadjusted", "adjusted"))
+
+blood<-ggplot(cellprop_melt_blood, aes(variable, value, color=as.factor(variable)))+
+  geom_point(shape=19, position = position_jitter(w = 0.2))+theme_bw()+xlab("Sample")+ylab("Cell Type Proportion")+
+  facet_grid(Tissue~Data, scales="free_x")+scale_color_manual(values=c("#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"),guide=FALSE)
+
+brain<-ggplot(cellprop_melt_brain, aes(variable, value, color=as.factor(variable)))+
+  geom_point(shape=19, position = position_jitter(w = 0.2))+theme_bw()+xlab("Sample")+ylab("Cell Type Proportion")+
+  facet_grid(Region~Data, scales="free_x")+scale_color_manual(values=c("#e31a1c", "#bd0026"),guide=FALSE)
+
+grid.arrange(blood, brain, heights = c(1.25, 3))
+
+```
+
+
+
+## Remover replicates
+```{r}
+rm_replicates<-c("BA7250rep", "PBMC169rep", "BA102482", "PBMC250rep")
+
+#cell comp adjusted
+combat_BLBR_Beta<-adj.residuals_blood_brain
+combat_BLBR_Beta<-combat_BLBR_Beta[,which(!(colnames(combat_BLBR_Beta)%in%rm_replicates))]# 441198 n=66
+save(combat_BLBR_Beta, file="cell_adjusted_Mcombat_Bmiq_BLBR_Beta_noreplicates.RData") #441198     66
+
+```
+
+
+

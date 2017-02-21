@@ -1,0 +1,11 @@
+Package: cetsBrain
+Maintainer: Martin Aryee <aryee.martin@mgh.harvard.edu>
+Author: Jerry Guitanvio, Martin J. Aryee, Zachary Kaminsky
+Version: 0.99.1
+License: GPL-3
+Title: FACS-sorted neuronal and glial DNA methylation samples for use
+        with the cets package
+Description: 
+Suggests: testthat, roxygen2
+Packaged: 2012-10-27 01:18:25 UTC; maryee
+Built: R 2.15.2; ; 2012-10-27 01:32:02 UTC; windows
