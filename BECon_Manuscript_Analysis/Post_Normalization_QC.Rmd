@@ -52,7 +52,7 @@ Beta_sample<-BLBR_Beta[sample(1:nrow(BLBR_Beta), 10000),]
 ## Beta distribtuions 
 looking good? Take just a random sample of CpGs for plotting (otherwise so slow)
 ```{r fig.width=10, fig.height=6}
-Beta_sample_melted<- melt(Beta_sample)
+Beta_sample_melted<- melt(BLBR_Beta)
 #remove NAs before plotting (otherwise get many non-inifnite warnings)
 Beta_Plot<-Beta_sample_melted[which(!(is.na(Beta_sample_melted$value))),]
 #add meta
