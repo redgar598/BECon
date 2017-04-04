@@ -22,6 +22,16 @@ fix_names<-unlist(lapply(meta$X, function(x) gsub(" ","", x , fixed=TRUE)))
 meta$X<-fix_names
 meta<-meta[which(meta$X%in%colnames(combat_BLBR_Beta)),]
 meta<-meta[match(colnames(combat_BLBR_Beta), meta$X),]
+
+#M value transformation
+Mval<-function(beta) log2(beta/(1-beta))
+combat_BLBR_MVal = apply(combat_BLBR_Beta[,1:63], 1, Mval) # need mvalues for combat (but rm BA20221 for now cause all NA)
+combat_BLBR_MVal = as.data.frame(combat_BLBR_MVal)
+combat_BLBR_MVal = t(combat_BLBR_MVal)
+combat_BLBR_MVal = as.data.frame(combat_BLBR_MVal)
+
+combat_BLBR_MVal$BA20221<-NA
+
 ```
 
 
@@ -35,12 +45,19 @@ library(scales)
 DMA<-function(tissueA, tissueB){
   # Subset to tissueA and tissueB
   TissueAB_indx<-which(meta$TissueType%in%c(tissueA,tissueB))
+  Mval_TissueAB<-combat_BLBR_MVal[,TissueAB_indx]
   combat_TissueAB<-combat_BLBR_Beta[,TissueAB_indx]
-  meta_TissueAB<-meta[which(meta$X%in%colnames(combat_TissueAB)),]
+  meta_TissueAB<-meta[which(meta$X%in%colnames(Mval_TissueAB)),]
   
-  p<-sapply(1:nrow(combat_TissueAB), function(x) {
-    z<-lm(unlist(combat_TissueAB[x,]) ~ meta_TissueAB$TissueType+meta_TissueAB$Gender+meta_TissueAB$Age+meta_TissueAB$SubjectNumC)
-    coef(summary(z))[2,4]})
+  p<-sapply(1:nrow(Mval_TissueAB), function(x) {
+    meta_ex<-meta_TissueAB
+    meta_ex$Mval<-unlist(Mval_TissueAB[x,])
+    
+    z<-lmer(Mval ~ TissueType+Gender+Age+(1|SubjectNumC), data=meta_ex)
+    z2<-lmer(Mval ~ Gender+Age+(1|SubjectNumC), data=meta_ex)
+    
+    Ftest<-anova(z,z2)
+    Ftest[["Pr(>Chisq)"]][2]    })
   
   hist(p)
   
@@ -57,8 +74,9 @@ DMA<-function(tissueA, tissueB){
   print(paste("Delta Beta Hits (0.1)", nrow(bio_hits), sep=": "))
   
   save(p, Multi_test_corr_relaxed, stat_hits, delbeta, bio_hits, 
-       file=paste("~/Documents/Blood_Brain/DMA_results/Results_",tissueA,tissueB,".RData", sep=""))
+       file=paste("Results_",tissueA,tissueB,".RData", sep=""))
   }
+
 
 
 DMA("PBMC","BRAIN10")
@@ -92,19 +110,20 @@ load(file=paste("DMA_results/Results_",tissueA,tissueB,".RData", sep=""))
   print(paste("Hypermethylated", length(sta_delbeta[which(sta_delbeta>=dB)]), sep=": "))
   print(paste("Hypomethylated", length(sta_delbeta[which(sta_delbeta<=(-dB))]) , sep=": "))
   
-  ## positive delta beta is hypomethylated (code for volcano should be right now, should colors change?)
+ ## positive delta beta is hypomethylated (code for volcano should be right now, should colors change?)
   color3<-sapply(1:nrow(volcano), function(x) if(volcano$Adjusted_Pvalue[x]<=Pv){
     if(abs(volcano$Delta_Beta[x])>dB){
-      if(volcano$Delta_Beta[x]>dB){"Hypermethylated\n(with Potential Biological Impact)"}else{"Hypomethylated\n (with Potential Biological Impact)"}
-      }else{if(volcano$Delta_Beta[x]>0){"Hypermethylated"}else{"Hypomethylated"}}}else{"Not Significantly Different"})
+      if(volcano$Delta_Beta[x]>dB){"Increased Methylation\n (Meeting Mean DNAm \nDifference Threshold)"}else{"Decreased Methylation\n (Meeting Mean DNAm \nDifference Threshold)"}
+      }else{if(volcano$Delta_Beta[x]>0){"Increased Methylation"}else{"Decreased Methylation"}}}else{"Not Significantly Different"})
   volcano$Interesting_CpG3<-color3
   volcano<-volcano[which(volcano$Adjusted_Pvalue<1),]
   
+  
   #omg
   volcano_plot<-ggplot(volcano, aes(Delta_Beta, -log10(Adjusted_Pvalue), color=Interesting_CpG3))+
-    geom_point(shape=19, size=1)+theme_bw()+scale_y_log10()+
+    geom_point(shape=19, size=1)+theme_bw()+
     scale_color_manual(values=c(muted("red", l=80, c=30),"red",muted("blue", l=70, c=40),"blue","grey"),
-                       name=paste("CpG Change Between \n", tissueA, "and", tissueB, sep=" "))+
+                       name=paste("CpG Change Between \n", label1, "and", label2, sep=" "))+
     geom_vline(xintercept=c(-dB,dB), color="grey60")+
     geom_hline(yintercept=-log10(Pv), color="grey60")+
     ylab("Multiple Test Corrected P Value (-log10)")+xlab("Delta Beta")+xlim(-1, 1)+
@@ -119,8 +138,8 @@ load(file=paste("DMA_results/Results_",tissueA,tissueB,".RData", sep=""))
 
 # Table summarizing the tissue DMA hit number
 ```{r}
-tissueA<-"PBMC"
-tissueB<-"BRAIN20"
+tissueA<-"BRAIN10"
+tissueB<-"BRAIN7"
 
 load(file=paste("DMA_results/Results_",tissueA,tissueB,".RData", sep=""))
 sta_bio_hits<-stat_hits[which(rownames(stat_hits)%in%rownames(bio_hits)),]
