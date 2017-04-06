@@ -7,7 +7,7 @@ options(shiny.maxRequestSize=30*1024^2)
 load("./data/BLBR_app_Objects_beta.RData")
 #load("~/BECon/data/BLBR_app_Objects_beta.RData")
 
- 
+
 # ## density plots stuff
 # correlations_BLBR_densityplt<-correlations_BLBR
 # correlations_BLBR_densityplt$mean<-rowMeans(correlations_BLBR_densityplt[,2:4])
@@ -126,7 +126,7 @@ summTable<-function(CpGs){
   varibility<-var_tissues[which(var_tissues$CpG%in%CpGs),]
   CpG_gene_correlations_varibility<-merge(CpG_gene_correlations, var_tissues, by.x="Probe_ID", by.y="CpG")
   CpG_gene_correlations_varibility<-CpG_gene_correlations_varibility[order(CpG_gene_correlations_varibility$Probe_ID),]
-
+  
   CpG_gene_correlations_varibility$Coordinate_37<-as.numeric(as.character(CpG_gene_correlations_varibility$Coordinate_37))
   CpG_gene_correlations_varibility<-CpG_gene_correlations_varibility[with(CpG_gene_correlations_varibility, order(gene, Coordinate_37)), ]
   
@@ -217,18 +217,18 @@ Colorful_table_plot<-function(CpGs){
   cor_var_for_plot$CpG<-factor(cor_var_for_plot$CpG, 
                                levels=CpG_order$Probe_ID)
   
-# #width
+  # #width
   cor_var_for_plot$variable<-as.character(cor_var_for_plot$variable)
   cor_var_for_plot$variable<-sapply(1:nrow(cor_var_for_plot), function(x) {
-  if(cor_var_for_plot$Data[x]=="Chr"){"  "}else{
-    if(cor_var_for_plot$Data[x]=="Coor"){"   "}else{
-      cor_var_for_plot$variable[x]}}
-    })
+    if(cor_var_for_plot$Data[x]=="Chr"){"  "}else{
+      if(cor_var_for_plot$Data[x]=="Coor"){"   "}else{
+        cor_var_for_plot$variable[x]}}
+  })
   
-cor_var_for_plot$variable<-as.factor(cor_var_for_plot$variable)
-cor_var_for_plot$w<-cor_var_for_plot$variable
-levels(cor_var_for_plot$w)<-c(4,0.6,2.8,1,1,1,1,1)
-cor_var_for_plot$w<-as.numeric(as.character(cor_var_for_plot$w))
+  cor_var_for_plot$variable<-as.factor(cor_var_for_plot$variable)
+  cor_var_for_plot$w<-cor_var_for_plot$variable
+  levels(cor_var_for_plot$w)<-c(4,0.6,2.8,1,1,1,1,1)
+  cor_var_for_plot$w<-as.numeric(as.character(cor_var_for_plot$w))
   
   ggplot(cor_var_for_plot, aes(variable, CpG, fill = color, width=w)) + #
     geom_tile(color = "black",size=0.5) +
@@ -245,7 +245,7 @@ cor_var_for_plot$w<-as.numeric(as.character(cor_var_for_plot$w))
           legend.text = element_text(size =10),
           legend.title = element_text(size =12),
           strip.text.x = element_text(size = 12, face="bold"))
-    
+  
 }
 
 
@@ -286,67 +286,66 @@ cor_var_for_plot$w<-as.numeric(as.character(cor_var_for_plot$w))
 shinyServer(function(input, output, session) {
   
   ## trying to get the CpG list drop down menu 
-
+  
   updateSelectizeInput(session, 'CpG_list', choices = CpG_names, server = TRUE)
   
   ## trying to get the gene list drop down menu 
-
+  
   updateSelectizeInput(session, 'gene_list', choices = gene_names, server = TRUE) 
   
   
-  # helpful text output
-  output$text2 <- renderText({paste("You have selected", CpG_list(input$gene_list, input$CpG_list)) })
-#   
-#   ## File input
-#         output$contents <- renderTable({
-#           # input$file1 will be NULL initially. After the user selects
-#           # and uploads a file, it will be a data frame with 'name',
-#           # 'size', 'type', and 'datapath' columns. The 'datapath'
-#           # column will contain the local filenames where the data can
-#           # be found.
-#           
-#           inFile <- input$file1
-#           
-#           if (is.null(inFile))
-#             return(NULL)
-#           
-#           read.csv(inFile$datapath, header = input$header,
-#                    sep = input$sep, quote = input$quote)
-#         })
   
+  
+  ## tryin to get CSV upload to work
+  filedata <- reactive({
+    infile <- input$datafile
+    if (is.null(infile)) {
+      # User has not uploaded a file yet
+      return(NULL)
+    }
+    read.csv(infile$datapath, header=F)
+  })
+  
+  
+  
+  # helpful text output
+  output$text2 <- renderText({
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    paste("You have selected", CpG_list(input$gene_list, c(input$CpG_list, csvcpg))) })
+  #   
   
 
+  
+  
   ####### COMETHYLATION PLOTS
-  output$plot1<-renderPlot({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+  output$plot1<-renderPlot({
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    if(length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))==0){
     plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, c("cg00308130","cg00201133"), input$CpGnum)
     print(plt)}else{
-      plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, CpG_list_forplottable(input$gene_list,input$CpG_list), input$CpGnum)
+      plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)), input$CpGnum)
       print(plt)}
   })
   
-#   plotHeight_cometh = reactive({
-#     if (input$CpGnum < length(CpG_list_forplottable(input$gene_list,input$CpG_list))){
-#       length(CpG_list_forplottable(input$gene_list,input$CpG_list))*100
-#     } else {
-#       if (input$CpGnum < 10){
-#         return(400)}
-#       else {
-#         input$CpGnum * 100}}
-#   })
-#   
-#   
-#   output$sized_plot <- renderUI({
-#     plotOutput("plot1",  height = input$CpGnum)
-#   })
-#   
-  
+ 
   
   # Download plots
-  plt_dwn<-reactive({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
-    plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, c("cg00308130","cg00201133"), input$CpGnum)
-    print(plt)}else{
-      plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, CpG_list_forplottable(input$gene_list,input$CpG_list), input$CpGnum)
-      print(plt)}
+  plt_dwn<-reactive({
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    if(length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))==0){
+      plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, c("cg00308130","cg00201133"), input$CpGnum)
+      print(plt)}else{
+        plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)), input$CpGnum)
+        print(plt)}
   })
   output$downloadPlot <- downloadHandler(
     filename = function() {paste('comethylationplots-', Sys.Date(), '.pdf', sep='')},
@@ -355,54 +354,79 @@ shinyServer(function(input, output, session) {
       plt_dwn()
       dev.off()
     })
-
-  
-
   
   
-############## Summary Table Render
+  
+  
+  
+  ############## Summary Table Render
   output$view <- renderTable({
-    if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    if(length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))==0){
       summTable(c("cg00308130","cg00201133"))
     }else{
-      summTable(CpG_list_forplottable(input$gene_list,input$CpG_list))}}, include.rownames=FALSE)
+      summTable(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))}}, include.rownames=FALSE)
   
   # # Download table
-  tab<-reactive({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+  tab<-reactive({
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    if(length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))==0){
     summTable(c("cg00308130","cg00201133"))
   }else{
-    summTable(CpG_list_forplottable(input$gene_list,input$CpG_list))}})
+    summTable(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))}})
   
   output$downloadData <- downloadHandler(
-     filename = function() {
-       paste('data-', Sys.Date(), '.csv', sep='')
-     },
-     content = function(con) {
-       write.csv(tab(), con)
-     })
- 
+    filename = function() {
+      paste('data-', Sys.Date(), '.csv', sep='')
+    },
+    content = function(con) {
+      write.csv(tab(), con)
+    })
+  
   
   #TABLE PLOT
   ## define height of plots depenedent on the CpGs used
   plotHeight = reactive({
-    if (length(CpG_list_forplottable(input$gene_list,input$CpG_list)) < 10) 
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    
+    if (length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg))) < 10) 
       return(300)
-    length(CpG_list_forplottable(input$gene_list,input$CpG_list)) * 40
-           })
+    length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg))) * 40
+  })
   
-  output$plotsum<-renderPlot({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+  output$plotsum<-renderPlot({
+    
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    if(length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))==0){
     plt<-Colorful_table_plot(c("cg00308130","cg00201133"))
     print(plt)}else{
-      plt<-Colorful_table_plot(CpG_list_forplottable(input$gene_list,input$CpG_list))
+      plt<-Colorful_table_plot(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))
       print(plt)}
   }, height=plotHeight,units="px")
   
-
+  
   # Download plots
-  plt_tbl_dwn<-reactive({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+  plt_tbl_dwn<-reactive({
+    df <-filedata()
+    #if (is.null(df)) return(NULL)
+    csvcpg=as.character(df[,1])
+    
+    if(length(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))==0){
     plt<-Colorful_table_plot(c("cg00308130","cg00201133"))
     print(plt)}else{
-      plt<-Colorful_table_plot(CpG_list_forplottable(input$gene_list,input$CpG_list))
+      plt<-Colorful_table_plot(CpG_list_forplottable(input$gene_list,c(input$CpG_list, csvcpg)))
       print(plt)}
   })
   
@@ -414,44 +438,44 @@ shinyServer(function(input, output, session) {
       plt_tbl_dwn()
       dev.off()
     })
-    
-
   
   
-#   ######### Correlation density plot
-#   output$plot2<-renderPlot({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
-#     plt<-cor_density_plot(c("cg00308130","cg00201133"))
-#     print(plt)}else{
-#       plt<-cor_density_plot(CpG_list_forplottable(input$gene_list,input$CpG_list))
-#       print(plt)}
-#   })
-#   
-#   ########## Variability density plot
-#   output$plot3<-renderPlot({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
-#     plt<-var_density_plot(c("cg00308130","cg00201133"))
-#     print(plt)}else{
-#       plt<-var_density_plot(CpG_list_forplottable(input$gene_list,input$CpG_list))
-#       print(plt)}
-#   })
-#   
   
- 
+  
+  #   ######### Correlation density plot
+  #   output$plot2<-renderPlot({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+  #     plt<-cor_density_plot(c("cg00308130","cg00201133"))
+  #     print(plt)}else{
+  #       plt<-cor_density_plot(CpG_list_forplottable(input$gene_list,input$CpG_list))
+  #       print(plt)}
+  #   })
+  #   
+  #   ########## Variability density plot
+  #   output$plot3<-renderPlot({if(length(CpG_list_forplottable(input$gene_list,input$CpG_list))==0){
+  #     plt<-var_density_plot(c("cg00308130","cg00201133"))
+  #     print(plt)}else{
+  #       plt<-var_density_plot(CpG_list_forplottable(input$gene_list,input$CpG_list))
+  #       print(plt)}
+  #   })
+  #   
+  
+  
   
   ##output$plot1<-renderPlot(plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, CpG_list_forplottable(input$gene_list,input$CpG_list), input$CpGnum)
-    #print(plt)})
+  #print(plt)})
   #output$view <- renderTable({
   #summTable(CpG_list_forplottable(input$gene_list,input$CpG_list))}, include.rownames=FALSE)
   
   
-    # output$view <- renderTable({
-    #summTable(CpG_list_forplottable(input$genename,input$cpgname))}, include.rownames=FALSE)
-
+  # output$view <- renderTable({
+  #summTable(CpG_list_forplottable(input$genename,input$cpgname))}, include.rownames=FALSE)
+  
   #output$plot1<-renderPlot({plt<-Comethylation_Plot(correlations_BLBR,combat_BLBR_Beta_adjusted, correlations_BLBR$CpG[1:input$CpGnum])
-                            #print(plt)})
+  #print(plt)})
   
   # Show the first "n" observations
   #output$view <- renderTable({
-    #summTable(correlations_BLBR$CpG[1:input$CpGnum])}, include.rownames=FALSE)
+  #summTable(correlations_BLBR$CpG[1:input$CpGnum])}, include.rownames=FALSE)
   
   
 })
