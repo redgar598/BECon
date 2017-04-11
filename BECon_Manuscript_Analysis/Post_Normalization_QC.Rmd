@@ -113,6 +113,23 @@ Loadings<-as.data.frame(unclass(PCA_full$loadings))
 vars <- PCA_full$sdev^2
 Importance<-vars/sum(vars)
 
+      ## PC0 
+      U<-PCA_full$scores
+      m = rowMeans(BLBR_Beta[complete.cases(BLBR_Beta),])
+      cor(U[,1], m)
+      
+      plt<-as.data.frame(t(BLBR_Beta[c(2,4),]))
+      ggplot(plt, aes(cg00000165, cg00000108))+geom_point()+geom_smooth(method="lm", formula = y~x-1)+
+        geom_hline(yintercept=0)+geom_vline(xintercept=0)
+      
+      plt<-as.data.frame(t(BLBR_Beta[c(2,4),]))
+      plt_means<-colMeans(plt)
+      plt_detrend<-plt
+      plt_detrend$cg00000108<-plt_detrend$cg00000108-plt_means[1]
+      plt_detrend$cg00000165<-plt_detrend$cg00000165-plt_means[2]
+
+      ggplot(plt_detrend, aes(cg00000165, cg00000108))+geom_point()+geom_smooth(method="lm", formula = y~x-1)+
+        geom_hline(yintercept=0)+geom_vline(xintercept=0)
 
 #Restructure meta
 meta$Barcode<-as.factor(meta$Barcode)
